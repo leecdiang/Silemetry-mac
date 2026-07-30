@@ -26,7 +26,7 @@ struct ContentView: View {
             Label("Diagnostics", systemImage: "stethoscope").tag(AppModel.Route.diagnostics)
         }
         .listStyle(.sidebar)
-        .navigationTitle("ThermalBench")
+        .navigationTitle("Silemetry")
     }
 
     @ViewBuilder

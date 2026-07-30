@@ -81,6 +81,7 @@ struct TestView: View {
                 // Only save cancellations with data
                 guard !coord.samples.isEmpty else {
                     app.route = .home
+                    app.resetForNewRun()
                     return
                 }
                 let run = RunRecord(config: coord.testConfig)
@@ -139,7 +140,9 @@ struct TestView: View {
     }
 
     var totalDuration: TimeInterval {
-        45.0 // minimal. For real tests, compute from config
+        if coord.isMonitorOnly { return 0 }
+        let c = coord.testConfig
+        return c.idleDuration + c.loadDuration + c.transitionDuration + c.cooldownDuration
     }
 
     // MARK: - Charts
@@ -433,9 +436,10 @@ struct TestView: View {
     }
 
     func stopTest() {
+        // coord.cancel() sets state to .cancelled,
+        // which triggers the onChange handler to save the RunRecord.
+        // Do NOT reset coordinator here — the save depends on it.
         coord.cancel()
-        app.route = .home
-        app.resetForNewRun()
     }
 
     func metricItem(_ label: String, value: String) -> some View {

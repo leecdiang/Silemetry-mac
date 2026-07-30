@@ -1,6 +1,7 @@
 // ThermalBench - GPU Workload Manager
 // Bridges Metal compute shaders to Swift for sustained GPU load.
 // Uses thermal_gpu_load (heavy) and thermal_gpu_light kernels.
+// Thread-safe: all state mutations are serialised through a private queue.
 import Metal
 
 final class GPUWorkloadManager {
@@ -11,9 +12,19 @@ final class GPUWorkloadManager {
     private var inputBuffer: MTLBuffer?
     private var outputBuffer: MTLBuffer?
 
-    private var isRunning = false
-    private var stopFlag = false
+    private let lock = NSLock()
+    private var _isRunning = false
+    private var _stopFlag = false
     private var workItem: DispatchWorkItem?
+
+    private var isRunning: Bool {
+        get { lock.withLock { _isRunning } }
+        set { lock.withLock { _isRunning = newValue } }
+    }
+    private var stopFlag: Bool {
+        get { lock.withLock { _stopFlag } }
+        set { lock.withLock { _stopFlag = newValue } }
+    }
 
     init?() {
         device = MTLCreateSystemDefaultDevice()
@@ -23,12 +34,13 @@ final class GPUWorkloadManager {
         }
     }
 
-    // MARK: - Setup
+    // MARK: - Setup (call once, idempotent)
 
     private func prepare() -> Bool {
         guard let device = device else { return false }
 
-        // Load the default Metal library bundled with the app (default.metallib)
+        if commandQueue != nil { return true }  // already prepared
+
         guard let library = device.makeDefaultLibrary() else {
             print("[GPUWorkload] Failed to load default Metal library")
             return false
@@ -50,12 +62,10 @@ final class GPUWorkloadManager {
 
         commandQueue = device.makeCommandQueue()
 
-        // Small buffers — the kernels are ALU-bound, not memory-bound
-        let bufSize = 16 * MemoryLayout<Float>.size * 4  // 16 × float4
+        let bufSize = 16 * MemoryLayout<Float>.size * 4
         inputBuffer = device.makeBuffer(length: bufSize, options: .storageModeShared)
         outputBuffer = device.makeBuffer(length: bufSize, options: .storageModeShared)
 
-        // Seed input buffer with deterministic values
         if let buf = inputBuffer {
             let ptr = buf.contents().assumingMemoryBound(to: Float.self)
             for i in 0 ..< (bufSize / MemoryLayout<Float>.size) {
@@ -66,26 +76,28 @@ final class GPUWorkloadManager {
         return true
     }
 
-    // MARK: - Public API
+    // MARK: - Public API (thread-safe)
 
     func start(intensity: GPUIntensity) {
-        guard intensity != .off, !isRunning else { return }
-        guard prepare() else { return }
+        guard intensity != .off else { return }
+        lock.lock()
+        if _isRunning { lock.unlock(); return }
+        _isRunning = true
+        _stopFlag = false
+        lock.unlock()
 
-        let pipeline: MTLComputePipelineState?
-        switch intensity {
-        case .light, .combinedSoC:
-            // .combinedSoC uses sustained GPU + CPU together;
-            // fall through to heavy pipeline for non-light GPU intensity
-            pipeline = (intensity == .light) ? lightPipeline : heavyPipeline
-        case .sustained:
-            pipeline = heavyPipeline
-        case .off:
+        guard prepare() else {
+            isRunning = false
             return
         }
 
-        stopFlag = false
-        isRunning = true
+        let pipeline: MTLComputePipelineState?
+        switch intensity {
+        case .light:     pipeline = lightPipeline
+        case .sustained,
+             .combinedSoC: pipeline = heavyPipeline
+        case .off:       isRunning = false; return
+        }
 
         let item = DispatchWorkItem { [weak self] in
             self?.gpuLoop(pipeline: pipeline, intensity: intensity)
@@ -97,11 +109,15 @@ final class GPUWorkloadManager {
     }
 
     func stop() {
-        guard isRunning else { return }
-        stopFlag = true
-        workItem?.cancel()
+        lock.lock()
+        guard _isRunning else { lock.unlock(); return }
+        _stopFlag = true
+        _isRunning = false
+        let item = workItem
         workItem = nil
-        isRunning = false
+        lock.unlock()
+
+        item?.cancel()
         print("[GPUWorkload] Stopped")
     }
 
@@ -115,15 +131,14 @@ final class GPUWorkloadManager {
 
         while !stopFlag {
             autoreleasepool {
-                guard let cmdBuf = queue.makeCommandBuffer(),
+                guard !stopFlag,
+                      let cmdBuf = queue.makeCommandBuffer(),
                       let encoder = cmdBuf.makeComputeCommandEncoder() else { return }
 
                 encoder.setComputePipelineState(pipeline)
                 encoder.setBuffer(output, offset: 0, index: 0)
                 encoder.setBuffer(input, offset: 0, index: 1)
 
-                // Dispatch a moderate grid; kernels are ALU-heavy so even
-                // modest thread counts will saturate the GPU.
                 let gridSize = MTLSize(width: 1024, height: 1, depth: 1)
                 let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
                 encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
@@ -132,8 +147,7 @@ final class GPUWorkloadManager {
                 cmdBuf.waitUntilCompleted()
             }
 
-            // Light mode: give the GPU breathing room
-            if intensity == .light {
+            if intensity == .light, !stopFlag {
                 Thread.sleep(forTimeInterval: 0.02)
             }
         }

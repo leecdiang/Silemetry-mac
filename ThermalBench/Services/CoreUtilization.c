@@ -6,8 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/sysctl.h>
 
-#define MAX_CORES 20
+#define MAX_CORES 32
 
 typedef struct {
     uint32_t logical_index;      // OS logical core index
@@ -33,23 +34,26 @@ static uint32_t g_e_count = 0;
 static processor_cpu_load_info_data_t g_prev[MAX_CORES];
 static int g_has_prev = 0;
 
-// M4 topology: cores 0-5 = efficiency, 6-9 = performance
-// fallback: if count==8 (M3 Pro/Max), 4E+4P
+/// Read P/E core counts from sysctl hw.perflevelN.logicalcpu (dynamic, no hardcoding).
+/// On Apple Silicon logical CPUs are enumerated E-cores first, then P-cores.
+/// perflevel0 = P-cores, perflevel1 = E-cores.
 static void detect_topology(uint32_t count) {
-    switch (count) {
-        case 10: g_e_count = 6; g_p_count = 4; break;  // M4 base/M4 Pro (10 cores)
-        case 12: g_e_count = 6; g_p_count = 6; break;  // M4 Max (12 E + P) 
-        case 8:  g_e_count = 4; g_p_count = 4; break;  // M3 Pro (8 cores)
-        case 6:  g_e_count = 4; g_p_count = 2; break;  // M3 (6 cores)
-        default:
-            // Unknown topology: assume first half are E, second half P
-            g_e_count = count / 2;
-            g_p_count = count - g_e_count;
-            break;
-    }
-    // M4 verified: cores 0-5 E, 6-9 P
-    // For other known configs, maintain the pattern
     g_core_count = count;
+    int32_t p = 0, e = 0;
+    size_t sz = sizeof(p);
+    if (sysctlbyname("hw.perflevel0.logicalcpu", &p, &sz, NULL, 0) == 0) {}
+    sz = sizeof(e);
+    if (sysctlbyname("hw.perflevel1.logicalcpu", &e, &sz, NULL, 0) == 0) {}
+
+    if (p > 0 && e > 0 && (uint32_t)(p + e) == count) {
+        g_p_count = (uint32_t)p;
+        g_e_count = (uint32_t)e;
+        return;
+    }
+
+    // Fallback: assume first half E, second half P
+    g_e_count = count / 2;
+    g_p_count = count - g_e_count;
 }
 
 CoreUtilSnapshot core_util_snapshot(void) {

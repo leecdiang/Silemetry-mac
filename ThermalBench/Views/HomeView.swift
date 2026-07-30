@@ -21,7 +21,7 @@ struct HomeView: View {
             .padding(32)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .navigationTitle("ThermalBench")
+        .navigationTitle("Silemetry")
         .alert("Ready to start?", isPresented: $showConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Start") { startTest(mode: selectedMode) }

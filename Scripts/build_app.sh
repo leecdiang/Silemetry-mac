@@ -87,6 +87,7 @@ C_LIBS=(
 SWIFT_FLAGS=(
     -sdk "$SDK_PATH"
     -target arm64-apple-macos14.0
+    -O
     -F "$SDK_PATH/System/Library/Frameworks"
     -framework SwiftUI
     -framework SwiftData
@@ -102,9 +103,6 @@ SWIFT_FLAGS=(
     -I"$PROJECT_DIR/WorkloadCore/include"
     -I"$PROJECT_DIR/TelemetryCore/include"
     -I"$BUILD_DIR"
-    -L"$BUILD_DIR"
-    -lTelemetryCore
-    -Xlinker -rpath -Xlinker "@executable_path/../Frameworks"
     -o "$BUILD_DIR/$APP_NAME"
     -parse-as-library
     -module-name ThermalBench
@@ -161,10 +159,14 @@ fi
 cp "$BUILD_DIR/default.metallib" "$APP_BUNDLE/Contents/Resources/"
 
 # Copy app icon
-cp "$PROJECT_DIR/Resources/ThirdParty/Streamline/Silemetry.icns" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+if ! cp "$PROJECT_DIR/Resources/ThirdParty/Streamline/Silemetry.icns" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null; then
+    echo "⚠️  Icon file not found — skipping"
+fi
 
 # Ad-hoc sign
-codesign --force --sign - "$APP_BUNDLE" 2>/dev/null || true
+if command -v codesign &>/dev/null; then
+    codesign --force --sign - "$APP_BUNDLE" || echo "⚠️  codesign failed"
+fi
 
 echo "✅ $APP_BUNDLE"
 

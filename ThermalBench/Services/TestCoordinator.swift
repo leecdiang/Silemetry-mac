@@ -59,6 +59,7 @@ final class TestCoordinator {
                     consecutiveReadFailures += 1
                     lastTelemetryError = error.localizedDescription
                     if consecutiveReadFailures > 10 {
+                        stopWorkload()
                         state = .failed("Telemetry read failed \(consecutiveReadFailures) times")
                         return
                     }
@@ -103,6 +104,7 @@ final class TestCoordinator {
                         consecutiveReadFailures += 1
                         lastTelemetryError = error.localizedDescription
                         if consecutiveReadFailures > 10 {
+                            stopWorkload()
                             state = .failed("Telemetry read failed \(consecutiveReadFailures) times")
                             return
                         }

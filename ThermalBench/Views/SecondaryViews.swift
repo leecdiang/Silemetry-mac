@@ -686,7 +686,7 @@ struct DiagnosticsView: View {
         let dev = DeviceProfile.current
         return ScrollView {
             GroupBox("App") {
-                LabeledContent("Version", value: "0.1.0 (build 1)")
+                LabeledContent("Version", value: BuildIdentity.appVersion)
                 LabeledContent("Git Commit", value: BuildIdentity.gitSHA)
                 LabeledContent("Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
                 LabeledContent("Model Identifier", value: dev.modelIdentifier)
