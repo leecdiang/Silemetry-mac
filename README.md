@@ -6,19 +6,18 @@ Silemetry 是一款原生 macOS 性能遥测工具，用于观察 Apple Silicon 
 
 #### 核心功能
 
-🔥 **CPU / GPU 压力测试** — 支持 CPU Only、GPU Only 和 CPU + GPU 三种模式。GPU 提供 Moderate（约30%）与 Maximum（约100%）两档 Metal compute 负载。可通过 Core Target 选择全部核心、P-Cores 或 E-Cores（基于 QoS 调度倾向）。
+🔥 CPU / GPU 压力测试 — 支持 CPU Only、GPU Only 和 CPU + GPU 三种模式。GPU 提供 Moderate（约30%）与 Maximum（约100%）两档 Metal compute 负载。可通过 Core Target 选择全部核心、P-Cores 或 E-Cores（基于 QoS 调度倾向）。
 
-⚙️ **Custom Test** — 自定义负载类型、阶段时长、采样间隔与环境温度。
+⚙️ Custom Test — 自定义负载类型、阶段时长、采样间隔与环境温度。
 
-📊 **实时遥测** — 温度（CPU/GPU Hottest & Average）、功耗（CPU/GPU/Package）、P/E-Cluster 频率、每核心利用率、系统热状态（Nominal/Fair/Serious/Critical）。
+📊 实时遥测 — 温度（CPU/GPU Hottest & Average）、功耗（CPU/GPU/Package）、P/E-Cluster 频率、每核心利用率、系统热状态（Nominal/Fair/Serious/Critical）。
 
-👁️ **Monitor Only** — 不启动内部负载，只记录外部应用（Cinebench、Blender、Xcode、AI 推理等）运行时的遥测数据。
+👁️ Monitor Only — 不启动内部负载，只记录外部应用（Cinebench、Blender、Xcode、AI 推理等）运行时的遥测数据。
 
-📁 **History & Compare** — 本地保存测试记录，支持重命名、删除、双跑 A/B 对比。
+📁 History & Compare — 本地保存测试记录，支持重命名、删除、双跑 A/B 对比。
 
-💻 **动态设备识别** — 自动读取当前 Mac 的 model identifier、芯片、核心拓扑、内存、macOS 版本和 Metal device。每个 Run 保存设备快照，换机后不会覆盖。
+💻 动态设备识别 — 自动读取当前 Mac 的 model identifier、芯片、核心拓扑、内存、macOS 版本和 Metal device。每个 Run 保存设备快照，换机后不会覆盖。
 
-🔋 **电源感知** — 区分充电、电池供电、Low Power Mode 与不可用状态。
 
 ---
 
