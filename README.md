@@ -203,7 +203,7 @@ Silemetry 会主动创建持续 CPU 或 GPU 负载。
 
 ---
 
-## 📦 v0.2.0 Preview
+## v0.2.0 
 
 ### 本次重点
 
