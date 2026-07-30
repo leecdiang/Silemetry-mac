@@ -1,36 +1,4 @@
-# Silemetry
-
-<p align="center">
-  <strong>See what your silicon can sustain.</strong><br>
-  记录 Apple Silicon 在持续负载下的温度、功耗、频率与核心活动。
-</p>
-
-<p align="center">
-
-[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple&style=flat-square)](#-下载与安装)
-[![Version](https://img.shields.io/github/v/release/leecdiang/Silemetry?include_prereleases&label=version&style=flat-square)](https://github.com/leecdiang/Silemetry/releases)
-[![Downloads](https://img.shields.io/github/downloads-pre/leecdiang/Silemetry/total?label=downloads&style=flat-square)](https://github.com/leecdiang/Silemetry/releases)
-[![License](https://img.shields.io/github/license/leecdiang/Silemetry?label=license&style=flat-square)](./LICENSE)
-
-</p>
-
-<p align="center">
-  <a href="README_EN.md">English</a> ·
-  <a href="../../releases/latest">下载最新版本</a> ·
-  <a href="../../issues">反馈问题</a>
-</p>
-
-<p align="center">
-  <img
-    src="https://github.com/user-attachments/assets/ba420c9e-b658-45d6-be5d-f231fad1777d"
-    alt="Silemetry"
-    width="520"
-  />
-</p>
-
----
-
-## 🔬 Silemetry 是什么？
+# Silemetry [![Version](https://img.shields.io/badge/version-0.2.0-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases)
 
 Silemetry 是一款原生 macOS 性能遥测工具，用于观察 Apple Silicon 在持续负载下的真实表现。
 
@@ -51,16 +19,16 @@ Silemetry 是一款原生 macOS 性能遥测工具，用于观察 Apple Silicon 
 
 | 功能 | 说明 |
 |---|---|
-| 🔥 **CPU / GPU 压力测试** | 支持 CPU Only、GPU Only 和 CPU + GPU |
-| 🎮 **Metal GPU Workload** | Moderate 与 Maximum 两档 GPU 负载 |
-| 🧠 **核心类型选择** | 可选择全部核心、P-Cores 或 E-Cores |
-| 🛠 **Custom Test** | 自定义负载类型、阶段时长、采样间隔与环境温度 |
-| 📈 **实时遥测** | 温度、功耗、频率、核心利用率与测试阶段 |
-| 👀 **Monitor Only** | 不启动内部负载，只记录外部应用运行数据 |
-| 🗂 **History** | 本地保存测试记录，支持重命名和删除 |
-| ⚖️ **Compare** | 对两个有效 Run 进行指标和曲线对比 |
-| 💻 **动态设备识别** | 自动读取当前 Mac 的芯片、核心、内存与系统信息 |
-| 🔋 **电源状态** | 区分充电、电池供电、Low Power Mode 与不可用状态 |
+|  **CPU / GPU 压力测试** | 支持 CPU Only、GPU Only 和 CPU + GPU |
+|  **Metal GPU Workload** | Moderate 与 Maximum 两档 GPU 负载 |
+|  **核心类型选择** | 可选择全部核心、P-Cores 或 E-Cores |
+|  **Custom Test** | 自定义负载类型、阶段时长、采样间隔与环境温度 |
+|  **实时遥测** | 温度、功耗、频率、核心利用率与测试阶段 |
+|  **Monitor Only** | 不启动内部负载，只记录外部应用运行数据 |
+|  **History** | 本地保存测试记录，支持重命名和删除 |
+|  **Compare** | 对两个有效 Run 进行指标和曲线对比 |
+|  **动态设备识别** | 自动读取当前 Mac 的芯片、核心、内存与系统信息 |
+|  **电源状态** | 区分充电、电池供电、Low Power Mode 与不可用状态 |
 
 ---
 
