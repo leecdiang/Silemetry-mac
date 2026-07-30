@@ -8,8 +8,6 @@
 <p align="center">
 
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple&style=flat-square)](#-下载与安装)
-[![SwiftUI](https://img.shields.io/badge/SwiftUI-Native-F05138?logo=swift&logoColor=white&style=flat-square)](./ThermalBench)
-[![Rust](https://img.shields.io/badge/Rust-Telemetry-000000?logo=rust&style=flat-square)](./TelemetryCore)
 [![Version](https://img.shields.io/github/v/release/leecdiang/Silemetry?include_prereleases&label=version&style=flat-square)](https://github.com/leecdiang/Silemetry/releases)
 [![Downloads](https://img.shields.io/github/downloads-pre/leecdiang/Silemetry/total?label=downloads&style=flat-square)](https://github.com/leecdiang/Silemetry/releases)
 [![License](https://img.shields.io/github/license/leecdiang/Silemetry?label=license&style=flat-square)](./LICENSE)
