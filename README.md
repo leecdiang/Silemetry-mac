@@ -4,6 +4,10 @@ Silemetry 是一款原生 macOS 性能遥测工具，专为观察 Apple Silicon 
 
 它不满足于记录一个瞬时峰值，而是在整个测试期间连续采集温度、功耗、频率、每核心活动、测试阶段和电源状态。测试结束后数据保存在本地 History 中，可随时查看、重命名、删除或进行 A/B 对比——方便你对比不同散热条件、系统版本或工作负载下的实际表现。
 
+<p align="center">
+  <img src="docs/images/screenshot-home.png" width="720" alt="Silemetry Home">
+</p>
+
 ---
 
 #### 核心功能
@@ -36,6 +40,10 @@ Silemetry 是一款原生 macOS 性能遥测工具，专为观察 Apple Silicon 
 
 区分交流充电、电池放电、Low Power Mode 和不可用四种状态，在 Home 页和测试页实时显示。Low Power Mode 开启时额外标注提醒。
 
+<p align="center">
+  <img src="docs/images/screenshot-custom.png" width="640" alt="Custom Test">
+</p>
+
 ---
 
 #### 测试模式与采集指标
@@ -61,6 +69,10 @@ Silemetry 是一款原生 macOS 性能遥测工具，专为观察 Apple Silicon 
 | 🧩 Per-Core Util | 每逻辑核 CPU 利用率，P/E 分别汇总 |
 | 🌡 Thermal State | macOS 系统热压力等级：Nominal → Fair → Serious → Critical |
 | ✅ Data Quality | 样本总数、有效覆盖时长、覆盖率及缺失/异常样本统计 |
+
+<p align="center">
+  <img src="docs/images/screenshot-compare.png" width="640" alt="Compare View">
+</p>
 
 ---
 

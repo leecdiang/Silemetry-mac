@@ -4,6 +4,10 @@ Silemetry is a native macOS telemetry tool for observing what an Apple Silicon M
 
 Instead of capturing a single peak score, it records temperature, power, frequency, per-core activity, test-phase timing, and power status throughout the entire run. Completed tests are saved locally in History, where they can be reviewed, renamed, deleted, or compared side-by-side—useful for evaluating different cooling setups, macOS versions, or workload configurations.
 
+<p align="center">
+  <img src="docs/images/screenshot-home.png" width="720" alt="Silemetry Home">
+</p>
+
 ---
 
 #### Core Features
@@ -36,6 +40,10 @@ No hardcoded device assumptions. Silemetry reads model identifier, chip name, CP
 
 Distinguishes between AC charging, battery discharge, Low Power Mode, and unavailable states. Shown live on both the Home and active-test screens, with an extra indicator when Low Power Mode is active.
 
+<p align="center">
+  <img src="docs/images/screenshot-custom.png" width="640" alt="Custom Test">
+</p>
+
 ---
 
 #### Test Modes & Collected Metrics
@@ -61,6 +69,10 @@ Distinguishes between AC charging, battery discharge, Low Power Mode, and unavai
 | 🧩 Per-Core Util | Per-logical-core CPU utilization with separate P/E summaries |
 | 🌡 Thermal State | macOS system thermal pressure: Nominal → Fair → Serious → Critical |
 | ✅ Data Quality | Total samples, effective coverage duration, coverage ratio, and missing-sample statistics |
+
+<p align="center">
+  <img src="docs/images/screenshot-compare.png" width="640" alt="Compare View">
+</p>
 
 ---
 
