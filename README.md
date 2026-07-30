@@ -1,301 +1,180 @@
 # Silemetry
 
 > **See what your silicon can sustain.**
+<img width="650" alt="image" src="https://github.com/user-attachments/assets/ba420c9e-b658-45d6-be5d-f231fad1777d" />
 
-Silemetry is a lightweight, native macOS app for recording and comparing the thermal and sustained-performance behavior of Apple Silicon Macs.
+Silemetry is a native macOS tool for tracing thermal behavior and sustained performance on Apple Silicon. It records temperature, power, frequency, utilization, test phases, and device metadata over time, then turns them into persistent results and comparable runs.
 
-It combines controlled workloads, Monitor Only recording, live telemetry, per-core activity, persistent history, detailed results, and A/B comparison in one self-contained application.
+## What it does
 
-> [!WARNING]
-> Silemetry is currently an **early preview**. It is already useful, but the interface, hardware compatibility, telemetry semantics, analysis, and export formats may still change. Preview results should not be treated as laboratory certification.
-
-<img width="1077" height="692" alt="image" src="https://github.com/user-attachments/assets/aa042060-0101-45d6-b030-d64f35927fdf" />
-
-
-## Why Silemetry?
-
-The name combines **silicon** and **telemetry**.
-
-Silemetry is designed to answer a practical question:
-
-> How much performance can this Mac actually sustain after heat, power limits, and workload duration begin to matter?
-
-It records more than a single peak score. It preserves the full timeline so that different runs, cooling setups, room conditions, and workloads can be compared later.
-
-## Highlights
-
-- Native SwiftUI macOS application
-- Apple Silicon only
-- Embedded Rust telemetry core
-- No Homebrew required for release users
-- No Python runtime
-- No `sudo`
-- No kernel extension
-- No SIP modification
-- No external `mactop` or `macmon` process
-- Controlled CPU stress-test presets
-- Monitor Only mode for external workloads
-- Live temperature, power, frequency, utilization, and phase views
-- CPU hottest and average readable thermal-zone temperatures
-- GPU hottest and average readable thermal-zone temperatures
-- CPU, GPU, and package power where available
-- P-cluster and E-cluster frequency
-- Per-core CPU utilization
-- Persistent test history
-- Rename and delete saved runs
-- Detailed results and data-quality information
-- A/B comparison between compatible saved runs
-- Local export formats supported by the current release candidate
-
-## Current release
-
-**Version:** `0.1.0-preview.1`
-
-This preview is being published early because users already need a simple Apple Silicon sustained-performance recorder.
-
-Primary validated configuration:
-
-- 15-inch MacBook Air
-- Apple M4
-- 10-core CPU: 4 performance cores + 6 efficiency cores
-- 24 GB unified memory
-- macOS 26.5.2
-
-Other Apple Silicon Macs may work, but have not yet received the same level of validation.
+- Runs controlled CPU, GPU, or combined stress workloads
+- Records CPU/GPU temperature, power, frequency, and utilization
+- Shows per-core CPU activity
+- Supports external workload recording through **Monitor Only**
+- Saves test history locally
+- Renames, deletes, reopens, and compares runs
+- Detects the current Mac dynamically instead of assuming a fixed model
+- Works without Homebrew, Python, `sudo`, kernel extensions, or SIP changes
+<img width="650" alt="image" src="https://github.com/user-attachments/assets/9131814a-83f5-416a-add0-ce315732bac5" />
 
 ## Test modes
 
 ### Quick Check
 
-A short run used to verify telemetry, workload startup, persistence, and charts.
+A short validation run for confirming telemetry, workload startup, charts, and persistence.
 
-Quick Check is **not long enough to establish thermal steady state**.
+It is not intended to establish thermal steady state.
 
-### Standard Test
+### Standard / Sustained / Extended
 
-A medium-length controlled run for routine comparison.
+Longer controlled tests for observing how power, temperature, and frequency change over time.
 
-### Sustained Test
+### Custom Test
 
-A longer run intended to reveal sustained power and frequency behavior after the chassis has heated up.
+Configure:
 
-### Extended Test
-
-A long-duration run for deeper thermal and performance analysis.
+- **Stress Type:** CPU Only / GPU Only / CPU + GPU
+- **Core Target:** All / Performance / Efficiency
+- **GPU Level:** Moderate / Maximum
+- Baseline, load, and cooldown duration
+- Sampling interval
+- Optional ambient temperature
 
 ### Monitor Only
 
-Records telemetry without starting Silemetry's internal workload.
+Records telemetry without launching Silemetry's own workload.
 
-Use it alongside:
+Useful for Cinebench, Blender, Xcode builds, video export, local AI inference, or any other repeatable workload.
 
-- Cinebench
-- Blender
-- Endurance
-- Xcode builds
-- compilation workloads
-- local AI inference
-- video export
-- another repeatable application
+## Telemetry
 
-Monitor Only normally ends when the user chooses **Finish Recording**, unless a fixed duration was configured.
+Depending on the Mac and macOS version, Silemetry may record:
 
-## Telemetry semantics
-
-### CPU Hottest
-
-The maximum temperature among the valid readable CPU thermal-zone sensors used by the embedded telemetry core.
-
-It is **not claimed to be Apple's official junction temperature**, a documented TjMax value, or the only signal used by macOS thermal management.
-
-### CPU Average
-
-The arithmetic mean of the same valid readable CPU thermal-zone sensor group.
-
-### GPU Hottest and GPU Average
-
-The equivalent maximum and arithmetic mean for the valid readable GPU thermal-zone sensor group.
-
-### Thermal State
-
-Thermal State is the system-level thermal-pressure status reported by macOS:
-
-- Nominal
-- Fair
-- Serious
-- Critical
-
-It is not the same as CPU Hottest. Thermal State may remain Nominal while an individual readable sensor is hot.
-
-### Frequency
-
-Silemetry distinguishes:
-
-- P-cluster frequency
-- E-cluster frequency
-- per-core utilization
-
-Cluster frequency must not be interpreted as ten independently measured instantaneous core clocks.
-
-Any per-core frequency presented by a future build must state its exact source and semantics.
-
-### Power
-
-Power fields may include:
-
+- CPU hottest temperature
+- CPU average temperature
+- GPU hottest temperature
+- GPU average temperature
 - CPU power
 - GPU power
 - package power
-- additional domains exposed by the telemetry source
+- P-cluster frequency
+- E-cluster frequency
+- per-core CPU utilization
+- macOS Thermal State
+- battery, charging, and Low Power Mode state
 
-Unavailable values are shown as unavailable. Silemetry must not replace missing data with zero.
+Unavailable metrics are shown as unavailable rather than being replaced with zero.
 
-Derived metrics must be labeled as derived.
+### Temperature semantics
 
-## Results, History, and Compare
+**CPU Hottest** is the maximum among the readable CPU thermal-zone sensors used by the telemetry backend.
 
-A completed run can contain:
+It is not claimed to be Apple's official junction temperature or TjMax.
 
-- temperature curves
-- power curves
-- P/E-cluster frequency curves
-- per-core utilization
-- peak and phase-average metrics
-- test-phase timing
-- sampling coverage
-- missing or invalid sample information
+**Thermal State** is the system-level pressure state reported by macOS. It may remain Nominal even when an individual readable temperature sensor is hot.
+
+### Frequency semantics
+
+P-cluster and E-cluster values are cluster-level frequency metrics. They should not be interpreted as ten independent instantaneous core clocks.
+
+## Device detection
+
+Silemetry reads the current device dynamically, including:
+
+- model identifier
+- Apple chip name
+- CPU core count and P/E topology
+- memory size
+- macOS version
+- Metal device name
+
+Each saved run stores a device snapshot, so imported or compared runs keep the identity of the Mac on which they were recorded.
+
+## Results and comparison
+
+Each completed run can include:
+
+- temperature, power, and frequency timelines
+- per-core CPU utilization
+- phase timing
+- peak and average metrics
+- sampling coverage and data-quality information
 - device and software metadata
 
-Saved runs can be:
+Saved runs can be reopened after restarting the app.
 
-- reopened after restarting Silemetry
-- renamed
-- deleted
-- selected for A/B comparison
-- exported
-
-Comparison results are only meaningful when the two runs are genuinely comparable. Important variables include:
-
-- device and chip
-- test mode
-- workload configuration
-- thread count
-- test duration
-- sampling interval
-- AC or battery power
-- Low Power Mode
-- ambient temperature
-- background activity
-- Silemetry version
-- telemetry-core version
-- data-schema version
+A/B comparison is most useful when both runs use the same device, workload, duration, power source, ambient conditions, and Silemetry version.
 
 ## Installation
 
-### Download
+1. Download the latest DMG from GitHub Releases.
+2. Open the DMG.
+3. Drag **Silemetry** into **Applications**.
+4. Launch Silemetry.
 
-1. Open the repository's **Releases** page.
-2. Download the latest Apple Silicon DMG:
-   `Silemetry-v0.1.0-preview.1-arm64.dmg`
-3. Verify the SHA-256 checksum.
-4. Open the DMG.
-5. Drag **Silemetry.app** into **Applications**.
-6. Launch Silemetry.
+Release asset:
 
-### Signing and Gatekeeper
+```text
+Silemetry-v0.2.0-preview-arm64.dmg
+```
 
-The Releases page must state whether the build is:
+If the preview is not notarized, macOS may block the first launch. Use Control-click → **Open**, or approve it in **System Settings → Privacy & Security**.
 
-- Developer ID signed and notarized, or
-- ad-hoc signed / unsigned and not notarized
-
-When a preview build is not notarized, macOS may block the first launch.
-
-Use one of the normal macOS methods:
-
-1. Control-click Silemetry in Applications.
-2. Choose **Open**.
-3. Confirm the launch.
-
-Or approve it in:
-
-`System Settings → Privacy & Security`
-
-Do **not** disable Gatekeeper globally.
+Do not disable Gatekeeper globally.
 
 ## Safety
 
 Silemetry intentionally creates sustained computational load.
 
-- The Mac enclosure may become hot.
-- macOS remains responsible for hardware thermal protection.
-- Silemetry does not disable thermal management.
-- Silemetry does not modify voltage, clocks, power limits, fan policy, or SMC settings.
-- Stop a test if the machine behaves unexpectedly.
+- The Mac may become hot.
+- macOS thermal protection remains enabled.
+- Silemetry does not change voltage, clocks, power limits, fan policy, or SMC settings.
+- Stop a test if the Mac behaves unexpectedly.
 - Keep fan vents unobstructed on Macs that have fans.
-- Avoid placing a hot Mac on heat-sensitive surfaces.
 
 ## Privacy
 
 Silemetry works locally.
 
-- No user account
+- No account
 - No telemetry upload
 - No analytics SDK
 - No advertising SDK
 - No cloud processing
 - No background daemon
-- No network connection required for testing
 
-Saved runs are stored under Silemetry's Application Support directory and can be deleted from History.
+Saved runs are stored locally and can be deleted from History.
+
+## Current preview
+
+**Version:** `0.2.0-preview`
+
+Primary validation machine:
+
+- 15-inch MacBook Air
+- Apple M4
+- 24 GB unified memory
+- macOS 26.5.2
+
+Other Apple Silicon Macs are supported through dynamic device detection, but not all models have received equal validation.
 
 ## Known limitations
 
-- This is an early preview and may contain bugs.
-- Apple does not provide stable public APIs for every Apple Silicon telemetry field.
-- A macOS update may change telemetry availability or semantics.
-- Sensor sets and names may differ between M-series chips.
-- The primary validated configuration is currently an M4 MacBook Air.
+- Apple does not expose stable public APIs for every Apple Silicon telemetry field.
+- Sensor availability can change between chips and macOS versions.
+- GPU core count may be unavailable when it cannot be read reliably.
 - Short tests do not establish steady state.
-- Thermal State is not a direct CPU temperature-wall indicator.
-- Per-core utilization is supported; per-core frequency semantics require careful validation.
-- Compare is only trustworthy when both runs use comparable conditions.
-- Some compact-window and localization issues may remain.
-- Export coverage may differ by preview build.
-- Signing and notarization status may differ between release assets.
-
-## Reporting a bug
-
-Please include:
-
-- Mac model
-- chip
-- memory size
-- macOS version
-- Silemetry version and build
-- telemetry-core version
-- test mode
-- reproduction steps
-- expected behavior
-- actual behavior
-- screenshot
-- exported Diagnostics, when available
-
-Do not upload private or unrelated files.
+- Compare results depend heavily on matching test conditions.
+- Some UI and export details may still change during the preview period.
 
 ## Build from source
 
-### Requirements
+Requirements:
 
 - Apple Silicon Mac
-- macOS 14 or later
-- Xcode with the macOS SDK
-- stable Rust toolchain
+- Xcode
+- Rust toolchain
 - Git
-
-Release users do not need Rust.
-
-### Build
 
 ```bash
 git clone https://github.com/OWNER/silemetry.git
@@ -311,88 +190,22 @@ xcodebuild \
   build
 ```
 
-The internal Xcode project and scheme may temporarily retain the old `ThermalBench` name to reduce release risk. The installed product and public documentation use **Silemetry**.
-
-Check `Docs/BUILDING.md` for the exact current command.
-
-## Repository structure
-
-```text
-Silemetry/
-├── ThermalBench/              # SwiftUI application source; internal name may remain temporarily
-├── TelemetryCore/             # Embedded Rust telemetry library
-├── WorkloadCore/              # Native workload implementation
-├── ThermalBenchTests/
-├── ThermalBenchUITests/
-├── Scripts/
-├── Docs/
-├── LICENSE
-└── THIRD_PARTY_NOTICES.md
-```
+The internal Xcode project may temporarily retain the older `ThermalBench` name. The installed product and public branding use **Silemetry**.
 
 ## Application icon
 
-Silemetry uses the icon:
-
-**`ai-chip-robot-flat`** from the **Streamline Flex Color** icon collection.
+Silemetry uses `ai-chip-robot-flat` from the Streamline Flex Color icon collection.
 
 - Author: Streamline
+- License: CC BY 4.0
 - Source: https://icon-sets.iconify.design/streamline-flex-color/ai-chip-robot-flat/
-- License: Creative Commons Attribution 4.0 International
 - License text: https://creativecommons.org/licenses/by/4.0/
 
-The artwork is used without visual modification. It is only converted and resized into the image formats required by the macOS AppIcon asset catalog.
-
-See `THIRD_PARTY_NOTICES.md` for the complete attribution.
-
-## Third-party software
-
-Silemetry includes vendored open-source components, including telemetry code derived from or based on `macmon`.
-
-See `THIRD_PARTY_NOTICES.md` for:
-
-- upstream project
-- version or tag
-- source commit
-- license
-- copyright
-- included files
-- local modifications
-
-## Contributing
-
-Bug reports and focused pull requests are welcome.
-
-Please:
-
-- keep changes scoped
-- preserve the native SwiftUI + embedded Rust architecture
-- add tests for telemetry, persistence, analysis, and migration changes
-- document metric semantics
-- avoid fake telemetry in release paths
-- avoid Electron, WebView, Python GUI, or runtime Homebrew dependencies
-
-See `CONTRIBUTING.md`.
-
-## Roadmap
-
-Near-term priorities:
-
-- broader Apple Silicon validation
-- responsive-layout fixes
-- stronger Monitor Only workflows
-- richer Results and export
-- stricter comparison-validity checks
-- improved thermal-state summaries
-- improved localization
-- signed and notarized builds
-- automated release verification
-
-The roadmap is not a delivery promise.
+The artwork is used without visual modification and is only converted and resized for the macOS AppIcon asset catalog.
 
 ## License
 
-Silemetry source code is released under the MIT License unless a file states otherwise.
+Silemetry's own source is released under the MIT License unless a file states otherwise.
 
 See:
 
@@ -401,8 +214,4 @@ See:
 
 ## Disclaimer
 
-Silemetry is an independent open-source project.
-
-It is not affiliated with, sponsored by, or endorsed by Apple Inc., Streamline, Iconify, or the maintainers of any telemetry dependency.
-
-Apple, Mac, macOS, and Apple Silicon are trademarks of Apple Inc.
+Silemetry is an independent open-source project and is not affiliated with or endorsed by Apple, Streamline, Iconify, or the maintainers of its telemetry dependencies.
