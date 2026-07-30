@@ -1,293 +1,134 @@
-# Silemetry [![Version](https://img.shields.io/badge/version-0.2.0-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![简体中文](https://img.shields.io/badge/语言-简体中文-4B5563?style=flat-square)](README.md) 
+# Silemetry [![Version](https://img.shields.io/badge/version-0.2.0-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![简体中文](https://img.shields.io/badge/语言-简体中文-4B5563?style=flat-square)](README.md)
 
 Silemetry is a native macOS telemetry tool for observing what an Apple Silicon Mac can sustain under continuous load.
 
-Instead of recording only a short peak score, it traces:
-
-- temperature
-- power
-- frequency
-- per-core activity
-- test phases
-- power and device metadata
-
-Completed runs are stored locally and can be reopened, renamed, deleted, or compared.
+Instead of capturing a single peak score, it records temperature, power, frequency, per-core activity, test-phase timing, and power status throughout the entire run. Completed tests are saved locally in History, where they can be reviewed, renamed, deleted, or compared side-by-side—useful for evaluating different cooling setups, macOS versions, or workload configurations.
 
 ---
 
-## ✨ Core Features
+#### Core Features
 
-| Feature | Description |
+🔥 **CPU / GPU Stress Testing**
+
+Three independent modes: CPU Only, GPU Only, and CPU + GPU. The GPU workload uses Metal compute with Moderate (~30%) and Maximum (~100%) presets. CPU Core Target lets you choose all cores, P-cores only, or E-cores only—the scheduling preference is implemented via macOS QoS, with no SIP modifications or kernel extensions required.
+
+⚙️ **Custom Test**
+
+Full control over stress type, core target, GPU level, phase durations (baseline / load / cooldown), sampling interval, and ambient temperature. Designed for controlled experiments.
+
+📊 **Live Telemetry**
+
+Real-time charts for CPU & GPU Hottest/Average temperatures, CPU/GPU/Package power, P-Cluster and E-Cluster frequency, per-core utilization, and macOS Thermal State (Nominal / Fair / Serious / Critical). All panels update as the test progresses.
+
+👁️ **Monitor Only**
+
+Records telemetry without starting any internal workload. Use alongside Cinebench, Blender, Xcode builds, local AI inference, video export, or any repeatable external workload.
+
+📁 **History & Compare**
+
+Every completed run is saved locally and can be renamed or deleted. The Compare view checks device, mode, and basic conditions for compatibility before overlaying metrics and timeline curves.
+
+💻 **Dynamic Device Detection**
+
+No hardcoded device assumptions. Silemetry reads model identifier, chip name, CPU P/E topology, memory, macOS version, and Metal device name at runtime via sysctl, ProcessInfo, and Metal. Each run stores a device snapshot—imported or compared runs preserve the identity of the original Mac.
+
+🔋 **Power Awareness**
+
+Distinguishes between AC charging, battery discharge, Low Power Mode, and unavailable states. Shown live on both the Home and active-test screens, with an extra indicator when Low Power Mode is active.
+
+---
+
+#### Test Modes & Collected Metrics
+
+| | |
 |---|---|
-|  **CPU / GPU Stress Tests** | CPU Only, GPU Only, and CPU + GPU |
-|  **Metal GPU Workload** | Moderate and Maximum GPU presets |
-|  **Core Targeting** | All cores, performance cores, or efficiency cores |
-|  **Custom Test** | Configure workload type, phases, sampling, and ambient temperature |
-|  **Live Telemetry** | Temperature, power, frequency, utilization, and phases |
-|  **Monitor Only** | Record an external workload without starting an internal load |
-|  **History** | Persist, reopen, rename, and delete runs |
-|  **Compare** | Compare metrics and curves from two valid runs |
-|  **Dynamic Device Detection** | Read the current chip, topology, memory, and system version |
-|  **Power Status** | Charging, battery operation, Low Power Mode, and unavailable states |
+| 🔬 Quick Check | Verifies telemetry and workload startup—too short for steady-state analysis |
+| 🔬 Standard | Routine thermal and performance comparison |
+| 🔥 Sustained | Observes sustained power draw and frequency behaviour, closer to thermal equilibrium |
+| 🔥 Extended | Long-duration deep analysis for evaluating cooling limits |
+| ⚙️ Custom | Fully configurable: stress type, core target, phase durations, sampling, ambient temp |
+| 👁️ Monitor Only | Records telemetry only, no internal load—pair with any external application |
+| **Metrics** | |
+| 🌡 CPU Hottest | Maximum among readable CPU thermal-zone sensors—not Apple's official junction temperature |
+| 🌡 CPU Average | Arithmetic mean of the same sensor group |
+| 🌡 GPU Hottest | Maximum among readable GPU thermal-zone sensors |
+| 🌡 GPU Average | Arithmetic mean of the same sensor group |
+| ⚡ CPU Power | CPU power draw. Shown as Unavailable when not readable—never replaced with zero |
+| ⚡ GPU Power | GPU power draw |
+| ⚡ Package Power | Package power and additional domains exposed by the platform |
+| ⏱ P-Cluster Freq | P-core cluster frequency—a cluster-level metric, not per-core instantaneous clocks |
+| ⏱ E-Cluster Freq | E-core cluster frequency |
+| 🧩 Per-Core Util | Per-logical-core CPU utilization with separate P/E summaries |
+| 🌡 Thermal State | macOS system thermal pressure: Nominal → Fair → Serious → Critical |
+| ✅ Data Quality | Total samples, effective coverage duration, coverage ratio, and missing-sample statistics |
 
 ---
 
-## 🚀 Test Modes
+#### Download & Install
 
-| Mode | Use case | Notes |
-|---|---|---|
-| **Quick Check** | Verify telemetry and workload startup | Too short for steady-state analysis |
-| **Standard Test** | Routine thermal and performance testing | Medium duration |
-| **Sustained Test** | Observe sustained power and frequency | Closer to thermal equilibrium |
-| **Extended Test** | Longer thermal characterization | Intended for deeper testing |
-| **Custom Test** | Build a controlled experiment | Configurable workload and phases |
-| **Monitor Only** | Cinebench, Blender, Xcode, AI inference, and more | Records without internal load |
+Download `Silemetry-v0.2.0-preview-arm64.dmg` from [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest).
+
+Open the DMG and drag Silemetry into Applications. The current preview is ad-hoc signed—on first launch, Control-click → **Open**, or approve it in **System Settings → Privacy & Security**. Do not disable Gatekeeper globally.
+
+The release build requires no Homebrew, Python, sudo, kernel extensions, or SIP modifications.
 
 ---
 
-## 🧪 Custom Test
+#### Privacy
 
-| Setting | Values |
-|---|---|
-| **Stress Type** | CPU Only / GPU Only / CPU + GPU |
-| **Core Target** | All / Performance / Efficiency |
-| **GPU Level** | Moderate / Maximum |
-| **Baseline** | Configurable |
-| **Load** | Configurable |
-| **Cooldown** | Configurable |
-| **Sampling Interval** | Configurable |
-| **Ambient Temperature** | Optional |
-
-> Core Target uses macOS QoS as a scheduling preference, not strict hardware affinity.  
-> GPU presets do not guarantee identical utilization percentages across every M-series GPU.
+Silemetry runs entirely on-device: no account, no telemetry upload, no analytics or advertising SDKs, no cloud processing, no background daemon. All run data stays in the local Application Support directory and can be deleted from within the app.
 
 ---
 
-## 📊 Telemetry
+#### Safety
 
-| Category | Metrics |
-|---|---|
-| 🌡 **Temperature** | CPU Hottest, CPU Average, GPU Hottest, GPU Average |
-| ⚡️ **Power** | CPU, GPU, Package, and other available power domains |
-| ⏱ **Frequency** | P-Cluster and E-Cluster |
-| 🧩 **Core Activity** | Per-core CPU utilization and P/E summaries |
-| 🌡 **Thermal State** | Nominal / Fair / Serious / Critical |
-| 🔋 **Power Source** | Charging, battery level, and Low Power Mode |
-| 💻 **Device** | Model identifier, chip, topology, memory, macOS, and Metal device |
-| ✅ **Data Quality** | Samples, duration, coverage, and missing data |
-
-Unavailable metrics are displayed as unavailable instead of being replaced with zero.
-
-### Temperature semantics
-
-**CPU Hottest** is the maximum value among the readable CPU thermal-zone sensors used by the telemetry backend.
-
-It is not claimed to be Apple's official junction temperature or a documented TjMax.
-
-**Thermal State** is a system-level pressure status reported by macOS. It may remain `Nominal` while an individual readable sensor is hot.
-
-### Frequency semantics
-
-P-Cluster and E-Cluster are cluster-level frequency metrics. They should not be interpreted as independent instantaneous clocks for every CPU core.
+Silemetry intentionally generates sustained CPU and GPU load. The enclosure becoming warm is normal, and macOS hardware thermal protection remains active at all times. Silemetry does not modify voltage, clocks, power limits, fan policy, or SMC parameters. Stop the test if the system behaves unexpectedly, and keep fan vents unobstructed on actively cooled Macs.
 
 ---
 
-## 💻 Dynamic Device Detection
+#### v0.2.0 Preview
 
-Starting with `v0.2.0-preview`, Silemetry no longer assumes every machine is an Apple M4 Mac.
+Metal GPU stress testing (Moderate / Maximum), CPU Only / GPU Only / CPU+GPU independent modes, P/E-core QoS scheduling, full Custom Test configuration, dynamic device detection, battery and Low Power Mode awareness, adaptive Status Pill component, and a new application icon.
 
-It dynamically reads and stores:
-
-| Field | Example |
-|---|---|
-| Model Identifier | `Mac16,13` |
-| Chip Name | `Apple M4` |
-| CPU Topology | `10 cores · 4P + 6E` |
-| Memory | `24 GB` |
-| macOS | `macOS 26.5.2` |
-| Metal Device | `Apple M4` |
-
-Each run stores a device snapshot captured at test time, so imported or compared runs keep the identity of the original Mac.
+Full changelog: [Release](https://github.com/leecdiang/Silemetry-mac/releases/latest).
 
 ---
 
-## 📥 Download and Install
+#### Tech Stack
 
-Download from [GitHub Releases](../../releases/latest):
+SwiftUI + Swift Charts · Embedded Rust Telemetry Core · C CPU Workload · Metal GPU Compute · SwiftData Persistence · sysctl + ProcessInfo + Metal Detection
 
-```text
-Silemetry-v0.2.0-preview-arm64.dmg
-Silemetry-v0.2.0-preview-arm64.zip
-Silemetry-v0.2.0-preview-SHA256SUMS.txt
-```
-
-### DMG installation
-
-1. Open the DMG.
-2. Drag **Silemetry** onto **Applications**.
-3. Launch it from the Applications folder.
-
-When a preview build is not notarized, use Control-click → **Open**, or approve it in:
-
-```text
-System Settings → Privacy & Security
-```
-
-Do not disable Gatekeeper globally.
+The internal project name is `ThermalBench`; the public product is **Silemetry**. Building from source requires an Apple Silicon Mac with Xcode, a stable Rust toolchain, and Git.
 
 ---
 
-## 🔒 Privacy
-
-Silemetry runs locally:
-
-- no account
-- no telemetry upload
-- no analytics SDK
-- no advertising SDK
-- no cloud processing
-- no background daemon
-
-Saved runs remain on the Mac and can be deleted from History.
-
----
-
-## ⚠️ Safety
-
-Silemetry intentionally creates sustained CPU and GPU load.
-
-- The enclosure may become hot.
-- macOS thermal protection remains enabled.
-- Silemetry does not modify voltage, clocks, power limits, fan policy, or SMC settings.
-- Stop the test if the system behaves unexpectedly.
-- Keep fan vents unobstructed on Macs with active cooling.
-
----
-
-## 📦 v0.2.0 Preview
-
-### Highlights
-
-- Metal GPU stress testing
-- CPU Only / GPU Only / CPU + GPU
-- P-Core / E-Core scheduling preference
-- Full Custom Test
-- Dynamic device detection
-- Battery and Low Power Mode status
-- Adaptive Status Pill
-- New application icon
-
-Details:
-
-- [Release](../../releases/latest)
-- [`RELEASE_v0.2.0-preview.md`](RELEASE_v0.2.0-preview.md)
-- [`RELEASE_NOTES_v0.2.0-preview.md`](RELEASE_NOTES_v0.2.0-preview.md)
-
----
-
-## 🧱 Architecture
-
-| Layer | Technology |
-|---|---|
-| UI | SwiftUI + Swift Charts |
-| Telemetry | Embedded Rust core |
-| CPU Workload | Native C |
-| GPU Workload | Metal Compute |
-| Persistence | SwiftData + local sample files |
-| Device Detection | sysctl / ProcessInfo / Metal |
-| Packaging | Drag-to-Applications DMG |
-
-The release build does not require:
-
-```text
-Homebrew · Python · sudo · kext · disabled SIP
-```
-
----
-
-## 🛠 Build from Source
-
-Requirements:
-
-- Apple Silicon Mac
-- Xcode
-- stable Rust toolchain
-- Git
-
-```bash
-git clone https://github.com/leecdiang/Silemetry.git
-cd Silemetry
-
-./Scripts/build_telemetry_core.sh
-
-xcodebuild \
-  -project ThermalBench.xcodeproj \
-  -scheme ThermalBench \
-  -configuration Debug \
-  -destination 'platform=macOS,arch=arm64' \
-  build
-```
-
-The internal Xcode project and scheme may temporarily retain the older `ThermalBench` name. The public application name is **Silemetry**.
-
----
-
-## 🗺 Roadmap
+#### Roadmap
 
 - [x] CPU stress testing
 - [x] Metal GPU stress testing
 - [x] CPU + GPU combined workload
-- [x] Monitor Only
-- [x] History and Compare
-- [x] Dynamic device information
+- [x] Monitor Only external recording
+- [x] History persistence and Compare
+- [x] Dynamic device detection
 - [ ] Validation across more Apple Silicon models
 - [ ] More complete report export
-- [ ] Stricter cross-device comparability analysis
+- [ ] Cross-device comparability analysis
 - [ ] UI localization and compact-window refinement
 - [ ] Developer ID signing and notarization
 - [ ] Automated release pipeline
 
 ---
 
-## 🎨 Application Icon
+#### Application Icon
 
-Silemetry uses `ai-chip-robot-flat` from the Streamline Flex Color collection:
+Uses `ai-chip-robot-flat` from the Streamline Flex Color icon collection (CC BY 4.0), converted and resized for the macOS AppIcon asset catalog with no visual modifications.
 
-| Item | Value |
-|---|---|
-| Author | Streamline |
-| License | CC BY 4.0 |
-| Source | https://icon-sets.iconify.design/streamline-flex-color/ai-chip-robot-flat/ |
-| License Text | https://creativecommons.org/licenses/by/4.0/ |
-
-The artwork is used without visual modification and is only converted and resized for the macOS AppIcon asset catalog.
+Source: https://icon-sets.iconify.design/streamline-flex-color/ai-chip-robot-flat/
 
 ---
 
-## 📄 License
+#### License
 
-Silemetry's own source is released under the MIT License.
-
-See:
-
-- [`LICENSE`](LICENSE)
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
-
----
-
-## 🙏 Acknowledgements
-
-Thanks to:
-
-- `macmon` and its contributors
-- Streamline
-- Iconify
-- the Swift, Rust, and Apple developer communities
-
----
-
-## ✍️ Author
+Source code is released under the MIT License. Third-party components and icon licenses are detailed in `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
 Built by [LEEcDiang](https://github.com/leecdiang).
-
-Issues, test results, and focused contributions are welcome.
