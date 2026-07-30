@@ -1,35 +1,5 @@
-# Silemetry
+# Silemetry [![Version](https://img.shields.io/badge/version-0.2.0-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases)
 
-<p align="center">
-  <strong>See what your silicon can sustain.</strong><br>
-  Trace temperature, power, frequency, and core activity under sustained load on Apple Silicon.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple" alt="macOS Apple Silicon">
-  <img src="https://img.shields.io/badge/SwiftUI-Native-F05138?logo=swift&logoColor=white" alt="SwiftUI">
-  <img src="https://img.shields.io/badge/Rust-Telemetry-000000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/version-0.2.0--preview-2F81F7" alt="Version">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
-</p>
-
-<p align="center">
-  <a href="README.md">简体中文</a> ·
-  <a href="../../releases/latest">Latest Release</a> ·
-  <a href="../../issues">Report an Issue</a>
-</p>
-
-<p align="center">
-  <img
-    src="https://github.com/user-attachments/assets/ba420c9e-b658-45d6-be5d-f231fad1777d"
-    alt="Silemetry"
-    width="520"
-  />
-</p>
-
----
-
-## 🔬 What is Silemetry?
 
 Silemetry is a native macOS telemetry tool for observing what an Apple Silicon Mac can sustain under continuous load.
 
@@ -44,24 +14,22 @@ Instead of recording only a short peak score, it traces:
 
 Completed runs are stored locally and can be reopened, renamed, deleted, or compared.
 
-> ⚠️ Silemetry is preview software. Sensor availability and metric semantics may differ between Apple Silicon generations and macOS releases.
-
 ---
 
 ## ✨ Core Features
 
 | Feature | Description |
 |---|---|
-| 🔥 **CPU / GPU Stress Tests** | CPU Only, GPU Only, and CPU + GPU |
-| 🎮 **Metal GPU Workload** | Moderate and Maximum GPU presets |
-| 🧠 **Core Targeting** | All cores, performance cores, or efficiency cores |
-| 🛠 **Custom Test** | Configure workload type, phases, sampling, and ambient temperature |
-| 📈 **Live Telemetry** | Temperature, power, frequency, utilization, and phases |
-| 👀 **Monitor Only** | Record an external workload without starting an internal load |
-| 🗂 **History** | Persist, reopen, rename, and delete runs |
-| ⚖️ **Compare** | Compare metrics and curves from two valid runs |
-| 💻 **Dynamic Device Detection** | Read the current chip, topology, memory, and system version |
-| 🔋 **Power Status** | Charging, battery operation, Low Power Mode, and unavailable states |
+|  **CPU / GPU Stress Tests** | CPU Only, GPU Only, and CPU + GPU |
+|  **Metal GPU Workload** | Moderate and Maximum GPU presets |
+|  **Core Targeting** | All cores, performance cores, or efficiency cores |
+|  **Custom Test** | Configure workload type, phases, sampling, and ambient temperature |
+|  **Live Telemetry** | Temperature, power, frequency, utilization, and phases |
+|  **Monitor Only** | Record an external workload without starting an internal load |
+|  **History** | Persist, reopen, rename, and delete runs |
+|  **Compare** | Compare metrics and curves from two valid runs |
+|  **Dynamic Device Detection** | Read the current chip, topology, memory, and system version |
+|  **Power Status** | Charging, battery operation, Low Power Mode, and unavailable states |
 
 ---
 
