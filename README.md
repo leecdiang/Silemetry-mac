@@ -23,22 +23,27 @@ Silemetry 是一款原生 macOS 性能遥测工具，用于观察 Apple Silicon 
 
 #### 测试模式与采集指标
 
-| 模式 | 说明 |
+| | |
 |---|---|
-| Quick Check | 快速确认遥测与负载正常 |
-| Standard Test | 日常性能与散热测试 |
-| Sustained Test | 观察持续功耗与降频 |
-| Extended Test | 长时间热性能分析 |
-| Custom Test | 完全自定义：Stress Type、Core Target、GPU Level、各阶段时长、采样间隔、环境温度 |
-| Monitor Only | 仅采集遥测，不创建内部负载 |
-
-| 指标 | 说明 |
-|---|---|
-| 温度 | CPU Hottest、CPU Average、GPU Hottest、GPU Average。CPU Hottest 是遥测后端可读取的 CPU thermal-zone 传感器最高值，不等同于 Apple 官方结温或 TjMax。Thermal State 是 macOS 系统级热压力状态 |
-| 功耗 | CPU、GPU、Package 及系统可用其他功耗域。不可用字段显示为 Unavailable，不用 0 冒充 |
-| 频率 | P-Cluster 与 E-Cluster 集群级指标，不应解释为每核心独立瞬时频率 |
-| 核心活动 | 每核心 CPU 利用率、P/E Cluster 汇总 |
-| 数据质量 | 样本数量、持续时间、覆盖率与缺失数据信息 |
+| 🔬 Quick Check | 快速确认遥测与负载正常 |
+| 🔬 Standard | 日常性能与散热测试 |
+| 🔥 Sustained | 观察持续功耗与降频，接近热稳定 |
+| 🔥 Extended | 长时间热性能深入分析 |
+| ⚙️ Custom | 完全自定义：Stress Type、Core Target、GPU Level、各阶段时长、采样间隔、环境温度 |
+| 👁️ Monitor Only | 仅采集遥测，不创建内部负载 |
+| **指标** | |
+| 🌡 CPU Hottest | 遥测后端可读取的 CPU thermal-zone 传感器最高值，非 Apple 官方结温 |
+| 🌡 CPU Average | 同组传感器的算术平均 |
+| 🌡 GPU Hottest | GPU thermal-zone 传感器最高值 |
+| 🌡 GPU Average | GPU thermal-zone 传感器算术平均 |
+| ⚡ CPU Power | CPU 功耗，不可用时显示 Unavailable，不用 0 冒充 |
+| ⚡ GPU Power | GPU 功耗 |
+| ⚡ Package Power | 封装功耗及系统可用其他功耗域 |
+| ⏱ P-Cluster | P 核集群频率，非每核心独立瞬时频率 |
+| ⏱ E-Cluster | E 核集群频率 |
+| 🧩 Per-Core Util | 每核心 CPU 利用率，P/E Cluster 汇总 |
+| 🌡 Thermal State | macOS 系统级热压力：Nominal / Fair / Serious / Critical |
+| ✅ 数据质量 | 样本数量、持续时间、覆盖率与缺失数据 |
 
 ---
 
