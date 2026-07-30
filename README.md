@@ -1,58 +1,333 @@
 # Silemetry
 
-> **See what your silicon can sustain.**
-<img width="650" alt="image" src="https://github.com/user-attachments/assets/ba420c9e-b658-45d6-be5d-f231fad1777d" />
+<p align="center">
+  <strong>See what your silicon can sustain.</strong><br>
+  记录 Apple Silicon 在持续负载下的温度、功耗、频率与核心活动。
+</p>
 
-Silemetry is a native macOS tool for tracing thermal behavior and sustained performance on Apple Silicon. It records temperature, power, frequency, utilization, test phases, and device metadata over time, then turns them into persistent results and comparable runs.
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple" alt="macOS Apple Silicon">
+  <img src="https://img.shields.io/badge/SwiftUI-Native-F05138?logo=swift&logoColor=white" alt="SwiftUI">
+  <img src="https://img.shields.io/badge/Rust-Telemetry-000000?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/version-0.2.0--preview-2F81F7" alt="Version">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+</p>
 
-## What it does
+<p align="center">
+  <a href="README_EN.md">English</a> ·
+  <a href="../../releases/latest">下载最新版本</a> ·
+  <a href="../../issues">反馈问题</a>
+</p>
 
-- Runs controlled CPU, GPU, or combined stress workloads
-- Records CPU/GPU temperature, power, frequency, and utilization
-- Shows per-core CPU activity
-- Supports external workload recording through **Monitor Only**
-- Saves test history locally
-- Renames, deletes, reopens, and compares runs
-- Detects the current Mac dynamically instead of assuming a fixed model
-- Works without Homebrew, Python, `sudo`, kernel extensions, or SIP changes
-<img width="650" alt="image" src="https://github.com/user-attachments/assets/9131814a-83f5-416a-add0-ce315732bac5" />
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/ba420c9e-b658-45d6-be5d-f231fad1777d"
+    alt="Silemetry"
+    width="520"
+  />
+</p>
 
-## Test modes
+---
 
-### Quick Check
+## 🔬 Silemetry 是什么？
 
-A short validation run for confirming telemetry, workload startup, charts, and persistence.
+Silemetry 是一款原生 macOS 性能遥测工具，用于观察 Apple Silicon 在持续负载下的真实表现。
 
-It is not intended to establish thermal steady state.
+它不只记录某个瞬时峰值，而是连续采集：
 
-### Standard / Sustained / Extended
+- 温度
+- 功耗
+- 频率
+- 每核心负载
+- 测试阶段
+- 电源与设备信息
 
-Longer controlled tests for observing how power, temperature, and frequency change over time.
+测试完成后，数据会保存到 History，可重新查看、重命名、删除或进行 A/B 对比。
 
-### Custom Test
+---
 
-Configure:
+## ✨ 核心功能
 
-- **Stress Type:** CPU Only / GPU Only / CPU + GPU
-- **Core Target:** All / Performance / Efficiency
-- **GPU Level:** Moderate / Maximum
-- Baseline, load, and cooldown duration
-- Sampling interval
-- Optional ambient temperature
+| 功能 | 说明 |
+|---|---|
+| 🔥 **CPU / GPU 压力测试** | 支持 CPU Only、GPU Only 和 CPU + GPU |
+| 🎮 **Metal GPU Workload** | Moderate 与 Maximum 两档 GPU 负载 |
+| 🧠 **核心类型选择** | 可选择全部核心、P-Cores 或 E-Cores |
+| 🛠 **Custom Test** | 自定义负载类型、阶段时长、采样间隔与环境温度 |
+| 📈 **实时遥测** | 温度、功耗、频率、核心利用率与测试阶段 |
+| 👀 **Monitor Only** | 不启动内部负载，只记录外部应用运行数据 |
+| 🗂 **History** | 本地保存测试记录，支持重命名和删除 |
+| ⚖️ **Compare** | 对两个有效 Run 进行指标和曲线对比 |
+| 💻 **动态设备识别** | 自动读取当前 Mac 的芯片、核心、内存与系统信息 |
+| 🔋 **电源状态** | 区分充电、电池供电、Low Power Mode 与不可用状态 |
 
-### Monitor Only
+---
 
-Records telemetry without launching Silemetry's own workload.
+## 🚀 测试模式
 
-Useful for Cinebench, Blender, Xcode builds, video export, local AI inference, or any other repeatable workload.
+| 模式 | 适用场景 | 特点 |
+|---|---|---|
+| **Quick Check** | 快速确认遥测与负载是否正常 | 时间短，不用于判断稳态性能 |
+| **Standard Test** | 日常性能与散热测试 | 时长适中 |
+| **Sustained Test** | 观察持续功耗与降频 | 更接近热稳定状态 |
+| **Extended Test** | 长时间热性能分析 | 适合深入测试 |
+| **Custom Test** | 自定义实验 | 可配置 CPU/GPU、核心类型和阶段时长 |
+| **Monitor Only** | Cinebench、Blender、Xcode、AI 推理等 | 只采集，不创建内部负载 |
 
-## Telemetry
+---
 
-Depending on the Mac and macOS version, Silemetry may record:
+## 🧪 Custom Test
 
-- CPU hottest temperature
-- CPU average temperature
-- GPU hottest temperature
+自定义测试目前支持：
+
+| 配置项 | 可选值 |
+|---|---|
+| **Stress Type** | CPU Only / GPU Only / CPU + GPU |
+| **Core Target** | All / Performance / Efficiency |
+| **GPU Level** | Moderate / Maximum |
+| **Baseline** | 自定义 |
+| **Load** | 自定义 |
+| **Cooldown** | 自定义 |
+| **Sampling Interval** | 自定义 |
+| **Ambient Temperature** | 可选填写 |
+
+> Core Target 使用 macOS QoS 进行调度倾向，不是不可迁移的硬件级 CPU affinity。  
+> GPU Level 是负载预设，不保证在所有 M 系列 GPU 上得到完全相同的利用率。
+
+---
+
+## 📊 采集指标
+
+| 类别 | 指标 |
+|---|---|
+| 🌡 **温度** | CPU Hottest、CPU Average、GPU Hottest、GPU Average |
+| ⚡️ **功耗** | CPU、GPU、Package，以及系统可用的其他功耗域 |
+| ⏱ **频率** | P-Cluster、E-Cluster |
+| 🧩 **核心活动** | 每核心 CPU 利用率、P/E Cluster 汇总 |
+| 🌡 **系统热状态** | Nominal / Fair / Serious / Critical |
+| 🔋 **电源** | 充电、电池电量、Low Power Mode |
+| 💻 **设备信息** | Model Identifier、芯片、核心拓扑、内存、macOS、Metal Device |
+| ✅ **数据质量** | 样本数量、持续时间、覆盖率与缺失数据 |
+
+不可用字段会显示为 `Unavailable`，不会用 `0` 冒充有效读数。
+
+### 温度口径
+
+**CPU Hottest** 是遥测后端可读取的 CPU thermal-zone 传感器中的最高值。
+
+它不等同于 Apple 官方公布的结温，也不代表固定的 TjMax。
+
+**Thermal State** 是 macOS 报告的系统级热压力状态。即使个别温度传感器较高，它仍可能保持 `Nominal`。
+
+### 频率口径
+
+P-Cluster 与 E-Cluster 是集群级频率指标，不应解释为每个核心各自独立的瞬时频率。
+
+---
+
+## 💻 动态设备识别
+
+从 `v0.2.0-preview` 开始，Silemetry 不再假设所有设备都是 Apple M4。
+
+应用会动态读取并保存：
+
+| 字段 | 示例 |
+|---|---|
+| Model Identifier | `Mac16,13` |
+| Chip Name | `Apple M4` |
+| CPU Topology | `10 cores · 4P + 6E` |
+| Memory | `24 GB` |
+| macOS | `macOS 26.5.2` |
+| Metal Device | `Apple M4` |
+
+每个 Run 会保存测试开始时的设备快照，因此在另一台 Mac 上打开或比较时，不会被当前机器的信息覆盖。
+
+---
+
+## 📥 下载与安装
+
+前往 [GitHub Releases](../../releases/latest) 下载：
+
+```text
+Silemetry-v0.2.0-preview-arm64.dmg
+Silemetry-v0.2.0-preview-arm64.zip
+Silemetry-v0.2.0-preview-SHA256SUMS.txt
+```
+
+### DMG 安装
+
+1. 打开 DMG
+2. 将左侧的 **Silemetry** 拖到右侧 **Applications**
+3. 从“应用程序”文件夹启动
+
+如果 Preview 版本尚未公证：
+
+1. 在“应用程序”中右键 Silemetry
+2. 选择 **打开**
+3. 确认启动
+
+也可以前往：
+
+```text
+系统设置 → 隐私与安全性
+```
+
+不要全局关闭 Gatekeeper。
+
+---
+
+## 🔒 隐私
+
+Silemetry 的测试与分析均在本机完成：
+
+- 不需要账号
+- 不上传遥测数据
+- 不包含广告 SDK
+- 不包含分析 SDK
+- 不依赖云端计算
+- 不需要后台守护进程
+
+History 数据保存在本机，并可在应用内删除。
+
+---
+
+## ⚠️ 使用提示
+
+Silemetry 会主动创建持续 CPU 或 GPU 负载。
+
+- 机身升温属于正常现象
+- macOS 的硬件热保护始终保持启用
+- Silemetry 不修改电压、时钟、功耗限制、风扇策略或 SMC
+- 如果系统出现异常，请立即停止测试
+- 有风扇的 Mac 请勿遮挡进出风口
+
+---
+
+## 📦 v0.2.0 Preview
+
+### 本次重点
+
+- Metal GPU 压力测试
+- CPU Only / GPU Only / CPU + GPU
+- P-Core / E-Core 调度倾向
+- 完整 Custom Test
+- 动态设备识别
+- 电池状态与 Low Power Mode
+- 自适应 Status Pill
+- 新 App 图标
+
+详细内容见：
+
+- [Release](../../releases/latest)
+- [`RELEASE_v0.2.0-preview.md`](RELEASE_v0.2.0-preview.md)
+- [`RELEASE_NOTES_v0.2.0-preview.md`](RELEASE_NOTES_v0.2.0-preview.md)
+
+---
+
+## 🧱 技术架构
+
+| 模块 | 技术 |
+|---|---|
+| UI | SwiftUI + Swift Charts |
+| Telemetry | Embedded Rust core |
+| CPU Workload | Native C |
+| GPU Workload | Metal Compute |
+| Persistence | SwiftData + local sample files |
+| Device Detection | sysctl / ProcessInfo / Metal |
+| Packaging | Drag-to-Applications DMG |
+
+运行 Release 版本不需要：
+
+```text
+Homebrew · Python · sudo · kext · 关闭 SIP
+```
+
+---
+
+## 🛠 从源码构建
+
+### 环境
+
+- Apple Silicon Mac
+- Xcode
+- Rust stable toolchain
+- Git
+
+```bash
+git clone https://github.com/leecdiang/Silemetry.git
+cd Silemetry
+
+./Scripts/build_telemetry_core.sh
+
+xcodebuild \
+  -project ThermalBench.xcodeproj \
+  -scheme ThermalBench \
+  -configuration Debug \
+  -destination 'platform=macOS,arch=arm64' \
+  build
+```
+
+内部 Xcode project / scheme 可能暂时保留旧名称 `ThermalBench`，公开应用名称为 **Silemetry**。
+
+---
+
+## 🗺 Roadmap
+
+- [x] CPU 压力测试
+- [x] Metal GPU 压力测试
+- [x] CPU + GPU 双负载
+- [x] Monitor Only
+- [x] History 与 Compare
+- [x] 动态设备信息
+- [ ] 更多 Apple Silicon 型号验证
+- [ ] 更完整的报告导出
+- [ ] 更严格的跨设备可比性分析
+- [ ] UI 本地化与窄窗口完善
+- [ ] Developer ID 签名与公证
+- [ ] 自动化 Release Pipeline
+
+---
+
+## 🎨 App 图标
+
+Silemetry 使用 Streamline Flex Color 图标集中的 `ai-chip-robot-flat`：
+
+| 项目 | 信息 |
+|---|---|
+| Author | Streamline |
+| License | CC BY 4.0 |
+| Source | https://icon-sets.iconify.design/streamline-flex-color/ai-chip-robot-flat/ |
+| License Text | https://creativecommons.org/licenses/by/4.0/ |
+
+图形未进行视觉修改，仅转换并缩放为 macOS AppIcon 所需格式。
+
+---
+
+## 📄 License
+
+Silemetry 自有源码采用 MIT License，第三方组件与图标许可见：
+
+- [`LICENSE`](LICENSE)
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+
+---
+
+## 🙏 Acknowledgements
+
+感谢以下开源项目与开发者：
+
+- `macmon` 及其贡献者
+- Streamline
+- Iconify
+- Swift、Rust 与 Apple 开发者社区
+
+---
+
+## ✍️ Author
+
+Built by [LEEcDiang](https://github.com/leecdiang).
+
+如果 Silemetry 对你有帮助，欢迎提交 Issue、改进建议或测试结果。
 - GPU average temperature
 - CPU power
 - GPU power
