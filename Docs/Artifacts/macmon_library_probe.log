@@ -1,0 +1,268 @@
+=== macmon library probe ===
+Sampler created successfully
+SoC: SocInfo {
+    mac_model: "Mac16,13",
+    chip_name: "Apple M4",
+    memory_gb: 24,
+    ecpu_cores: 6,
+    pcpu_cores: 4,
+    ecpu_label: "E",
+    pcpu_label: "P",
+    ecpu_freqs: [
+        900,
+        1080,
+        1476,
+        1860,
+        2172,
+        2496,
+        2808,
+        2892,
+    ],
+    pcpu_freqs: [
+        912,
+        1260,
+        1512,
+        1800,
+        2088,
+        2352,
+        2616,
+        2868,
+        3096,
+        3300,
+        3468,
+        3624,
+        3756,
+        3876,
+        3936,
+        3984,
+        4044,
+        4104,
+        4416,
+        4464,
+    ],
+    gpu_cores: 10,
+    gpu_freqs: [
+        0,
+        338,
+        618,
+        796,
+        836,
+        928,
+        952,
+        1056,
+        1053,
+        1170,
+        1152,
+        1278,
+        1204,
+        1338,
+        1326,
+        1470,
+    ],
+}
+
+--- sample=1 ---
+cpu_temp: 63.4°C
+gpu_temp: 55.9°C
+cpu_power: 4.831W
+gpu_power: 0.019W
+ane_power: 0.000W
+all_power: 4.850W
+sys_power: 12.730W
+ram_power: 0.687W
+pcpu_freq: 4464MHz
+ecpu_freq: 1696MHz
+pcpu_usage: 26.2%
+ecpu_usage: 22.5%
+cpu_usage: 24.0%
+gpu_freq: 338MHz
+gpu_usage: 1.3%
+
+--- sample=2 ---
+cpu_temp: 63.1°C
+gpu_temp: 56.1°C
+cpu_power: 4.555W
+gpu_power: 0.015W
+ane_power: 0.000W
+all_power: 4.570W
+sys_power: 14.153W
+ram_power: 0.651W
+pcpu_freq: 4464MHz
+ecpu_freq: 1338MHz
+pcpu_usage: 25.3%
+ecpu_usage: 14.4%
+cpu_usage: 18.7%
+gpu_freq: 338MHz
+gpu_usage: 0.9%
+
+--- sample=3 ---
+cpu_temp: 63.0°C
+gpu_temp: 55.6°C
+cpu_power: 4.563W
+gpu_power: 0.014W
+ane_power: 0.000W
+all_power: 4.578W
+sys_power: 12.414W
+ram_power: 0.655W
+pcpu_freq: 4464MHz
+ecpu_freq: 1360MHz
+pcpu_usage: 25.3%
+ecpu_usage: 15.2%
+cpu_usage: 19.3%
+gpu_freq: 338MHz
+gpu_usage: 0.9%
+
+--- sample=4 ---
+cpu_temp: 62.7°C
+gpu_temp: 55.7°C
+cpu_power: 4.629W
+gpu_power: 0.016W
+ane_power: 0.000W
+all_power: 4.645W
+sys_power: 12.105W
+ram_power: 0.662W
+pcpu_freq: 4464MHz
+ecpu_freq: 1391MHz
+pcpu_usage: 25.7%
+ecpu_usage: 15.5%
+cpu_usage: 19.6%
+gpu_freq: 338MHz
+gpu_usage: 1.1%
+
+--- sample=5 ---
+cpu_temp: 63.0°C
+gpu_temp: 55.8°C
+cpu_power: 4.908W
+gpu_power: 0.020W
+ane_power: 0.000W
+all_power: 4.928W
+sys_power: 12.120W
+ram_power: 0.571W
+pcpu_freq: 4464MHz
+ecpu_freq: 1449MHz
+pcpu_usage: 28.9%
+ecpu_usage: 8.9%
+cpu_usage: 16.9%
+gpu_freq: 338MHz
+gpu_usage: 1.4%
+
+--- sample=6 ---
+cpu_temp: 62.5°C
+gpu_temp: 55.2°C
+cpu_power: 4.550W
+gpu_power: 0.021W
+ane_power: 0.000W
+all_power: 4.571W
+sys_power: 12.011W
+ram_power: 0.556W
+pcpu_freq: 4464MHz
+ecpu_freq: 1493MHz
+pcpu_usage: 26.3%
+ecpu_usage: 7.7%
+cpu_usage: 15.1%
+gpu_freq: 338MHz
+gpu_usage: 1.5%
+
+--- sample=7 ---
+cpu_temp: 61.8°C
+gpu_temp: 55.5°C
+cpu_power: 4.379W
+gpu_power: 0.022W
+ane_power: 0.000W
+all_power: 4.401W
+sys_power: 12.208W
+ram_power: 0.537W
+pcpu_freq: 4464MHz
+ecpu_freq: 1398MHz
+pcpu_usage: 25.3%
+ecpu_usage: 6.1%
+cpu_usage: 13.8%
+gpu_freq: 338MHz
+gpu_usage: 1.6%
+
+--- sample=8 ---
+cpu_temp: 63.1°C
+gpu_temp: 55.3°C
+cpu_power: 5.288W
+gpu_power: 0.019W
+ane_power: 0.000W
+all_power: 5.308W
+sys_power: 11.722W
+ram_power: 0.568W
+pcpu_freq: 4464MHz
+ecpu_freq: 1541MHz
+pcpu_usage: 33.8%
+ecpu_usage: 8.3%
+cpu_usage: 18.5%
+gpu_freq: 338MHz
+gpu_usage: 1.4%
+
+--- sample=9 ---
+cpu_temp: 62.2°C
+gpu_temp: 55.7°C
+cpu_power: 4.444W
+gpu_power: 0.022W
+ane_power: 0.000W
+all_power: 4.466W
+sys_power: 12.796W
+ram_power: 0.559W
+pcpu_freq: 4464MHz
+ecpu_freq: 1561MHz
+pcpu_usage: 25.4%
+ecpu_usage: 8.4%
+cpu_usage: 15.2%
+gpu_freq: 338MHz
+gpu_usage: 1.5%
+
+--- sample=10 ---
+cpu_temp: 62.2°C
+gpu_temp: 54.8°C
+cpu_power: 4.550W
+gpu_power: 0.024W
+ane_power: 0.000W
+all_power: 4.574W
+sys_power: 11.643W
+ram_power: 0.560W
+pcpu_freq: 4464MHz
+ecpu_freq: 1585MHz
+pcpu_usage: 26.5%
+ecpu_usage: 7.1%
+cpu_usage: 14.8%
+gpu_freq: 338MHz
+gpu_usage: 1.6%
+
+--- sample=11 ---
+cpu_temp: 61.4°C
+gpu_temp: 54.9°C
+cpu_power: 4.400W
+gpu_power: 0.019W
+ane_power: 0.000W
+all_power: 4.419W
+sys_power: 11.414W
+ram_power: 0.544W
+pcpu_freq: 4464MHz
+ecpu_freq: 1343MHz
+pcpu_usage: 25.3%
+ecpu_usage: 6.3%
+cpu_usage: 13.9%
+gpu_freq: 338MHz
+gpu_usage: 1.4%
+
+--- sample=12 ---
+cpu_temp: 61.7°C
+gpu_temp: 55.3°C
+cpu_power: 4.335W
+gpu_power: 0.011W
+ane_power: 0.000W
+all_power: 4.346W
+sys_power: 11.528W
+ram_power: 0.518W
+pcpu_freq: 4464MHz
+ecpu_freq: 1318MHz
+pcpu_usage: 25.0%
+ecpu_usage: 5.5%
+cpu_usage: 13.3%
+gpu_freq: 338MHz
+gpu_usage: 1.1%
+
+=== DONE ===

@@ -1,0 +1,50 @@
+[package]
+name = "macmon"
+version = "0.8.0"
+edition = "2024"
+description = "Apple Silicon system monitor & Rust library — CPU/GPU power, temperature, RAM. No sudo. TUI, JSON pipe, Prometheus exporter."
+authors = ["vladkens"]
+license = "MIT"
+repository = "https://github.com/vladkens/macmon"
+homepage = "https://github.com/vladkens/macmon"
+documentation = "https://docs.rs/macmon"
+readme = "readme.md"
+include = ["src/**", "Cargo.toml", "Cargo.lock", "LICENSE", "readme.md"]
+keywords = ["macos", "apple-silicon", "monitoring", "prometheus", "tui"]
+categories = ["command-line-utilities", "hardware-support", "visualization"]
+[package.metadata.docs.rs]
+targets = ["aarch64-apple-darwin"]
+
+[lib]
+name = "macmon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "macmon"
+path = "src/main.rs"
+
+[lints.rust]
+non_camel_case_types = "allow"
+unreachable_code = "allow"
+unused_assignments = "allow"
+unused_imports = "deny"
+
+[lints.clippy]
+needless_range_loop = "allow"
+single_match = "allow"
+
+[profile.release]
+panic = "abort"
+strip = false
+lto = false
+
+[dependencies]
+chrono = "0.4.45"
+clap = { version = "4.6.4", features = ["derive"] }
+core-foundation = "0.10.1"
+libc = "0.2.189"
+num-traits = "0.2.19"
+ratatui = { version = "0.30.2", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde-inline-default = "1.0.2"
+serde_json = "1.0.151"
