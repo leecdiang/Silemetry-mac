@@ -77,28 +77,18 @@ struct TestView: View {
                 }
                 app.route = .result(run.uuid)
             }
-            if case .cancelled = newState {
-                // Only save cancellations with data
-                guard !coord.samples.isEmpty else {
+            if case .cancelled(let run) = newState {
+                // The coordinator supplies a fully analysed record, or nil when no
+                // samples were collected and there is nothing to save.
+                guard let run else {
                     app.route = .home
                     app.resetForNewRun()
                     return
                 }
-                let run = RunRecord(config: coord.testConfig)
-                run.wasInterrupted = true
-                run.sampleCount = coord.samples.count
-                let dev = DeviceProfile.current
-                run.deviceModelIdentifier = dev.modelIdentifier
-                run.chipName = dev.chipName
-                run.cpuCoreCount = dev.cpuCoreCount
-                run.performanceCoreCount = dev.performanceCoreCount
-                run.efficiencyCoreCount = dev.efficiencyCoreCount
-                run.gpuCoreCount = dev.gpuCoreCount ?? 0
-                run.memoryBytes = Int64(dev.memoryBytes)
-                run.macOSVersion = dev.macOSVersion
-                run.metalDeviceName = dev.metalDeviceName ?? ""
                 modelContext.insert(run)
-                try? modelContext.save()
+                do { try modelContext.save() } catch {
+                    print("[PERSIST] save error: \(error)")
+                }
             }
         }
     }

@@ -8,7 +8,10 @@ final class TestCoordinator {
         case idle
         case running(TestPhase, elapsed: TimeInterval, remaining: TimeInterval)
         case complete(RunRecord)
-        case cancelled
+        /// Carries the partial run when samples were collected before cancelling,
+        /// so the interrupted run is persisted with its analysis rather than rebuilt
+        /// from scratch by the view. `nil` when there was nothing worth saving.
+        case cancelled(RunRecord?)
         case failed(String)
     }
 
@@ -45,7 +48,6 @@ final class TestCoordinator {
         if config.mode == .monitorOnly {
             // Monitor Only: single infinite monitoring phase
             currentPhase = .baseline
-            let phaseStart = DispatchTime.now().uptimeNanoseconds
             while !untilStoppedFlag && !cancelledFlag && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(Int(config.sampleInterval * 1000)))
 
@@ -79,6 +81,11 @@ final class TestCoordinator {
             ]
 
             for (phase, duration) in phases {
+                // Leave the phase loop entirely on cancel. Without this the next
+                // iteration would still run its phase setup — re-starting the
+                // workload for `.loading` — before the inner loop noticed the flag.
+                if cancelledFlag || Task.isCancelled { break }
+
                 let phaseStart = DispatchTime.now().uptimeNanoseconds
                 currentPhase = phase
 
@@ -121,6 +128,11 @@ final class TestCoordinator {
         await telemetry.stopTelemetry()
         stopWorkload()
 
+        // `cancel()` has already published `.cancelled` with its own record. Falling
+        // through to `.complete` here would fire the view's onChange a second time and
+        // save a duplicate history entry for the same run.
+        if cancelledFlag || Task.isCancelled { return }
+
         // Build RunRecord
         let snapshot = samples
         let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
@@ -134,20 +146,24 @@ final class TestCoordinator {
     }
 
     func cancel() {
+        guard !cancelledFlag else { return }
         cancelledFlag = true
         Task { await telemetry.stopTelemetry() }
         stopWorkload()
 
-        if !samples.isEmpty {
-            let snapshot = samples
-            let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
-            let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: testConfig)
-            run.wasInterrupted = true
-            run.phaseRaw = TestPhase.cancelled.rawValue
-            state = .cancelled
-        } else {
-            state = .cancelled
+        guard !samples.isEmpty else {
+            state = .cancelled(nil)
+            return
         }
+
+        let snapshot = samples
+        let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
+        let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: testConfig)
+        run.wasInterrupted = true
+        run.phaseRaw = TestPhase.cancelled.rawValue
+        // Hand the record to the view. It used to be built here and dropped, leaving
+        // the view to reconstruct a bare record with no samples or analysis.
+        state = .cancelled(run)
     }
 
     // MARK: - Run Construction
