@@ -75,6 +75,23 @@ actor TelemetryService {
     }
 
     func readSample() async throws -> TelemetrySample {
+        // Absorb the startup race: the Rust sampler thread flips `running`
+        // asynchronously after start(), so an immediate first read can hit
+        // NotStarted/Stopped before the thread is actually up.
+        for attempt in 0..<10 {
+            do {
+                return try await readSampleOnce()
+            } catch TelemetryError.stopped {
+                if attempt == 9 {
+                    throw TelemetryError.stopped(readLastError())
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        throw TelemetryError.stopped(readLastError())
+    }
+
+    private func readSampleOnce() async throws -> TelemetrySample {
         guard handle != nil, isRunning else {
             throw TelemetryError.notStarted
         }
@@ -93,15 +110,25 @@ actor TelemetryService {
                 let err = tb_telemetry_wait_next(h, afterSeq, 5000, &raw)
                 let capturedRaw = raw
                 Task { @Sendable in
-                    await self.processResult(err: err, raw: capturedRaw, continuation: continuation)
+                    await self.processResult(err: err, raw: capturedRaw, h: h, continuation: continuation)
                 }
             }
         }
     }
 
+    private func readLastError() -> String? {
+        guard let h = handle else { return nil }
+        var buf = [CChar](repeating: 0, count: 512)
+        let rc = tb_telemetry_last_error(h, &buf, 512)
+        guard rc == TB_OK else { return nil }
+        let s = String(cString: buf)
+        return s.isEmpty ? nil : s
+    }
+
     private func processResult(
         err: TBErrorCode,
         raw: TBTelemetrySample,
+        h: TBTelemetryHandle,
         continuation: CheckedContinuation<TelemetrySample, any Error>
     ) {
         switch err {
@@ -187,7 +214,10 @@ actor TelemetryService {
             continuation.resume(throwing: TelemetryError.timeout)
 
         case TB_ERR_STOPPED, TB_ERR_NOT_STARTED:
-            continuation.resume(throwing: TelemetryError.stopped)
+            var buf = [CChar](repeating: 0, count: 512)
+            let rc = tb_telemetry_last_error(h, &buf, 512)
+            let detail = rc == TB_OK ? String(cString: buf) : ""
+            continuation.resume(throwing: TelemetryError.stopped(detail.isEmpty ? nil : detail))
 
         default:
             continuation.resume(throwing: TelemetryError.readFailed("tb_telemetry_wait_next: \(err)"))
@@ -229,7 +259,7 @@ enum TelemetryError: Error, LocalizedError {
     case initialization(String)
     case notStarted
     case timeout
-    case stopped
+    case stopped(String?)
     case readFailed(String)
 
     var errorDescription: String? {
@@ -237,7 +267,8 @@ enum TelemetryError: Error, LocalizedError {
         case .initialization(let msg): "Telemetry init failed: \(msg)"
         case .notStarted: "Telemetry not started"
         case .timeout: "Telemetry read timeout"
-        case .stopped: "Telemetry stopped"
+        case .stopped(let detail):
+            (detail?.isEmpty == false ? "Telemetry stopped: \(detail ?? "")" : "Telemetry stopped")
         case .readFailed(let msg): "Telemetry read failed: \(msg)"
         }
     }

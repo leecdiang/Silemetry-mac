@@ -58,13 +58,13 @@ enum RunAnalyzer {
             duration = 0
         }
 
-        // Temperature
-        let validTemps = samples.compactMap { s -> (cpu: Double, gpu: Double?)? in
-            guard s.tempValid, let cpu = s.cpuTemp else { return nil }
-            return (cpu, s.gpuTemp)
+        // Temperature — peaks use hottest, averages use cpuTemp/gpuTemp
+        let validTemps = samples.compactMap { s -> (hottest: Double, cpu: Double, gpuHottest: Double?, gpu: Double?)? in
+            guard s.tempValid, let hottest = s.cpuTempHottest, let cpu = s.cpuTemp else { return nil }
+            return (hottest, cpu, s.gpuTempHottest, s.gpuTemp)
         }
-        let cpuPeakTemp = validTemps.map(\.cpu).max()
-        let gpuPeakTemp = validTemps.compactMap(\.gpu).max()
+        let cpuPeakTemp = validTemps.map(\.hottest).max()
+        let gpuPeakTemp = validTemps.compactMap(\.gpuHottest).max()
         let cpuAvgTemp = validTemps.isEmpty ? nil : validTemps.map(\.cpu).reduce(0, +) / Double(validTemps.count)
         let gpuAvgTemp = validTemps.compactMap(\.gpu).isEmpty ? nil :
             validTemps.compactMap(\.gpu).reduce(0, +) / Double(validTemps.compactMap(\.gpu).count)
