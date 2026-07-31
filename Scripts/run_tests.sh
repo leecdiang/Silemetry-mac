@@ -12,7 +12,18 @@ echo "=== ThermalBench Unit Tests ==="
 
 mkdir -p "$BUILD_DIR"
 
+# Generate build identity (same injection as build_app.sh)
+GIT_SHA=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME=$(date -u +%H%M%S)
+cat > "$BUILD_DIR/BuildIdentityGenerated.swift" <<EOF
+enum BuildIdentityGenerated {
+    static let gitSHA = "$GIT_SHA"
+    static let buildTimestampUTC = "$BUILD_TIME"
+}
+EOF
+
 SWIFT_SRC=$(find "$PROJECT_DIR/ThermalBench" -name "*.swift" ! -path "*/App/*" | sort)
+SWIFT_SRC="$SWIFT_SRC $BUILD_DIR/BuildIdentityGenerated.swift"
 TEST_SRC="$PROJECT_DIR/ThermalBenchTests/ThermalBenchTestMain.swift"
 
 swiftc \
@@ -28,8 +39,6 @@ swiftc \
     -I"$PROJECT_DIR/WorkloadCore/include" \
     -I"$PROJECT_DIR/TelemetryCore/include" \
     -I"$BUILD_DIR" \
-    -L"$BUILD_DIR" \
-    -lthermalbench_telemetry_core \
     -o "$TEST_BIN" \
     -module-name ThermalBenchTests \
     $SWIFT_SRC \

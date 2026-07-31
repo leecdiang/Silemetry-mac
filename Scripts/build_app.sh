@@ -74,7 +74,20 @@ echo "✅ default.metallib"
 # ─── 4. Swift Compilation ────────────────────────────────────────────────
 echo "--- Compiling Swift App ---"
 
+# Generate build identity (injected, not hardcoded)
+GIT_SHA=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME=$(date -u +%H%M%S)
+cat > "$BUILD_DIR/BuildIdentityGenerated.swift" <<EOF
+enum BuildIdentityGenerated {
+    static let gitSHA = "$GIT_SHA"
+    static let buildTimestampUTC = "$BUILD_TIME"
+}
+EOF
+
+echo "✅ BuildIdentity injected: $GIT_SHA @ $BUILD_TIME"
+
 SWIFT_FILES=$(find "$PROJECT_DIR/ThermalBench" -name "*.swift" | sort)
+SWIFT_FILES="$SWIFT_FILES $BUILD_DIR/BuildIdentityGenerated.swift"
 # External C function declarations
 C_LIBS=(
     "$BUILD_DIR/cpu_workload.o"

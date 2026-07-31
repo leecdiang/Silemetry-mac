@@ -5,6 +5,9 @@
 import Metal
 
 final class GPUWorkloadManager {
+    /// GPU threads dispatched per frame; must match the shader grid size.
+    private static let elementCount = 1024
+
     private let device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
     private var heavyPipeline: MTLComputePipelineState?
@@ -15,7 +18,10 @@ final class GPUWorkloadManager {
     private let lock = NSLock()
     private var _isRunning = false
     private var _stopFlag = false
+    private var _generation = 0
     private var workItem: DispatchWorkItem?
+    /// Signalled when a dispatch loop actually exits (used by stop() to wait).
+    private let loopGroup = DispatchGroup()
 
     private var isRunning: Bool {
         get { lock.withLock { _isRunning } }
@@ -24,6 +30,9 @@ final class GPUWorkloadManager {
     private var stopFlag: Bool {
         get { lock.withLock { _stopFlag } }
         set { lock.withLock { _stopFlag = newValue } }
+    }
+    private var generation: Int {
+        lock.withLock { _generation }
     }
 
     init?() {
@@ -62,7 +71,8 @@ final class GPUWorkloadManager {
 
         commandQueue = device.makeCommandQueue()
 
-        let bufSize = 16 * MemoryLayout<Float>.size * 4
+        // Must match the 1024-thread grid dispatched per frame.
+        let bufSize = Self.elementCount * MemoryLayout<SIMD4<Float>>.stride
         inputBuffer = device.makeBuffer(length: bufSize, options: .storageModeShared)
         outputBuffer = device.makeBuffer(length: bufSize, options: .storageModeShared)
 
@@ -84,6 +94,8 @@ final class GPUWorkloadManager {
         if _isRunning { lock.unlock(); return }
         _isRunning = true
         _stopFlag = false
+        _generation += 1
+        let gen = _generation
         lock.unlock()
 
         guard prepare() else {
@@ -100,12 +112,15 @@ final class GPUWorkloadManager {
         }
 
         let item = DispatchWorkItem { [weak self] in
-            self?.gpuLoop(pipeline: pipeline, intensity: intensity)
+            guard let self else { return }
+            self.loopGroup.enter()
+            defer { self.loopGroup.leave() }
+            self.gpuLoop(pipeline: pipeline, intensity: intensity, generation: gen)
         }
         workItem = item
         DispatchQueue.global(qos: .userInitiated).async(execute: item)
 
-        print("[GPUWorkload] Started (\(intensity.displayName))")
+        print("[GPUWorkload] Started (\(intensity.displayName)) gen=\(gen)")
     }
 
     func stop() {
@@ -118,20 +133,26 @@ final class GPUWorkloadManager {
         lock.unlock()
 
         item?.cancel()
+        // Wait for the old loop to actually exit before returning, so a
+        // subsequent start() cannot run two loops concurrently.
+        let result = loopGroup.wait(timeout: .now() + 2.0)
+        if result == .timedOut {
+            print("[GPUWorkload] Warning: loop did not exit within 2s")
+        }
         print("[GPUWorkload] Stopped")
     }
 
     // MARK: - GPU Dispatch Loop
 
-    private func gpuLoop(pipeline: MTLComputePipelineState?, intensity: GPUIntensity) {
+    private func gpuLoop(pipeline: MTLComputePipelineState?, intensity: GPUIntensity, generation: Int) {
         guard let pipeline = pipeline,
               let queue = commandQueue,
               let input = inputBuffer,
               let output = outputBuffer else { return }
 
-        while !stopFlag {
+        while !stopFlag && generation == self.generation {
             autoreleasepool {
-                guard !stopFlag,
+                guard !stopFlag, generation == self.generation,
                       let cmdBuf = queue.makeCommandBuffer(),
                       let encoder = cmdBuf.makeComputeCommandEncoder() else { return }
 
@@ -139,12 +160,18 @@ final class GPUWorkloadManager {
                 encoder.setBuffer(output, offset: 0, index: 0)
                 encoder.setBuffer(input, offset: 0, index: 1)
 
-                let gridSize = MTLSize(width: 1024, height: 1, depth: 1)
+                let gridSize = MTLSize(width: Self.elementCount, height: 1, depth: 1)
                 let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
                 encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
                 encoder.endEncoding()
                 cmdBuf.commit()
                 cmdBuf.waitUntilCompleted()
+
+                // Surface Metal errors instead of failing silently.
+                if cmdBuf.status == .error {
+                    let detail = cmdBuf.error.map { String(describing: $0) } ?? "unknown"
+                    print("[GPUWorkload] Command buffer error: \(detail)")
+                }
             }
 
             if intensity == .light, !stopFlag {

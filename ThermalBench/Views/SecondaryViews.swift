@@ -262,11 +262,10 @@ struct ResultsView: View {
         let pct = core.utilizationPercent ?? 0
         let color: Color = core.kind == .performance ? .indigo : .teal
         let label: String = {
-            if core.kind == .performance {
-                let idx = core.logicalCoreIndex - 6 + 1
-                return "P\(idx)"
-            } else {
-                return "E\(core.logicalCoreIndex + 1)"
+            switch core.kind {
+            case .performance: "P\(core.displayIndex)"
+            case .efficiency:  "E\(core.displayIndex)"
+            case .unknown:     "?\(core.displayIndex)"
             }
         }()
         return HStack(spacing: 8) {
@@ -980,7 +979,7 @@ struct DiagnosticsView: View {
         let ts = TelemetryService.shared
         Task {
             do {
-                try await ts.startTelemetry()
+                try await ts.startTelemetry(intervalMilliseconds: 250)
                 let s = try await ts.readSample()
                 await ts.stopTelemetry()
                 probe = ProbeResult(

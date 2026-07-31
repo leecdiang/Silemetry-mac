@@ -9,6 +9,6 @@ enum BuildIdentity {
         return "\(version) (build \(build))"
     }()
 
-    static let gitSHA = "ba0b000"
-    static let buildTimestampUTC = "045600"
+    static let gitSHA = BuildIdentityGenerated.gitSHA
+    static let buildTimestampUTC = BuildIdentityGenerated.buildTimestampUTC
 }

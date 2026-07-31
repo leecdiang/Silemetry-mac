@@ -77,28 +77,23 @@ struct TestView: View {
                 }
                 app.route = .result(run.uuid)
             }
-            if case .cancelled = newState {
-                // Only save cancellations with data
-                guard !coord.samples.isEmpty else {
+            if case .cancelled(let run) = newState {
+                // Stopped with data — persist the coordinator-built final record.
+                guard run.sampleCount > 0, run.duration > 0 else {
                     app.route = .home
                     app.resetForNewRun()
                     return
                 }
-                let run = RunRecord(config: coord.testConfig)
-                run.wasInterrupted = true
-                run.sampleCount = coord.samples.count
-                let dev = DeviceProfile.current
-                run.deviceModelIdentifier = dev.modelIdentifier
-                run.chipName = dev.chipName
-                run.cpuCoreCount = dev.cpuCoreCount
-                run.performanceCoreCount = dev.performanceCoreCount
-                run.efficiencyCoreCount = dev.efficiencyCoreCount
-                run.gpuCoreCount = dev.gpuCoreCount ?? 0
-                run.memoryBytes = Int64(dev.memoryBytes)
-                run.macOSVersion = dev.macOSVersion
-                run.metalDeviceName = dev.metalDeviceName ?? ""
                 modelContext.insert(run)
-                try? modelContext.save()
+                do { try modelContext.save() } catch {
+                    print("[PERSIST] save error: \(error)")
+                }
+                app.route = .result(run.uuid)
+            }
+            if case .discarded = newState {
+                // Explicitly discarded — nothing to persist.
+                app.route = .home
+                app.resetForNewRun()
             }
         }
     }
@@ -280,7 +275,7 @@ struct TestView: View {
         }
         .alert("Cancel Recording?", isPresented: $showCancelConfirm) {
             Button("Keep Recording", role: .cancel) {}
-            Button("Discard", role: .destructive) { stopTest() }
+            Button("Discard", role: .destructive) { discardTest() }
         } message: {
             Text("Data will not be saved.")
         }
@@ -411,11 +406,10 @@ struct TestView: View {
         let pct = core.utilizationPercent ?? 0
         let color: Color = core.kind == .performance ? .indigo : .teal
         let label: String = {
-            if core.kind == .performance {
-                let idx = core.logicalCoreIndex - 6 + 1
-                return "P\(idx)"
-            } else {
-                return "E\(core.logicalCoreIndex + 1)"
+            switch core.kind {
+            case .performance: "P\(core.displayIndex)"
+            case .efficiency:  "E\(core.displayIndex)"
+            case .unknown:     "?\(core.displayIndex)"
             }
         }()
         return HStack(spacing: 8) {
@@ -436,10 +430,14 @@ struct TestView: View {
     }
 
     func stopTest() {
-        // coord.cancel() sets state to .cancelled,
-        // which triggers the onChange handler to save the RunRecord.
-        // Do NOT reset coordinator here — the save depends on it.
-        coord.cancel()
+        // Stop and keep data: coordinator builds the final RunRecord and the
+        // onChange handler persists it. Do NOT reset the coordinator here.
+        coord.stopAndSave()
+    }
+
+    func discardTest() {
+        // Discard everything: nothing is persisted.
+        coord.cancelAndDiscard()
     }
 
     func metricItem(_ label: String, value: String) -> some View {

@@ -8,7 +8,10 @@ final class TestCoordinator {
         case idle
         case running(TestPhase, elapsed: TimeInterval, remaining: TimeInterval)
         case complete(RunRecord)
-        case cancelled
+        /// Stopped with data — carries the final RunRecord to persist.
+        case cancelled(RunRecord)
+        /// Discarded — nothing to persist.
+        case discarded
         case failed(String)
     }
 
@@ -37,7 +40,7 @@ final class TestCoordinator {
         untilStoppedFlag = false
         state = .running(.preflight, elapsed: 0, remaining: totalDuration(config))
 
-        do { try await telemetry.startTelemetry() }
+        do { try await telemetry.startTelemetry(intervalMilliseconds: Int(config.sampleInterval * 1000)) }
         catch { state = .failed("Telemetry start: \(error.localizedDescription)"); return }
 
         let startTime = DispatchTime.now().uptimeNanoseconds
@@ -59,7 +62,7 @@ final class TestCoordinator {
                     consecutiveReadFailures += 1
                     lastTelemetryError = error.localizedDescription
                     if consecutiveReadFailures > 10 {
-                        stopWorkload()
+                        await cleanup()
                         state = .failed("Telemetry read failed \(consecutiveReadFailures) times")
                         return
                     }
@@ -104,7 +107,7 @@ final class TestCoordinator {
                         consecutiveReadFailures += 1
                         lastTelemetryError = error.localizedDescription
                         if consecutiveReadFailures > 10 {
-                            stopWorkload()
+                            await cleanup()
                             state = .failed("Telemetry read failed \(consecutiveReadFailures) times")
                             return
                         }
@@ -118,13 +121,12 @@ final class TestCoordinator {
             }
         }
 
-        await telemetry.stopTelemetry()
-        stopWorkload()
+        await cleanup()
 
         // Build RunRecord
         let snapshot = samples
         let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
-        let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: config)
+        let run = Self.buildRunRecord(snapshot: snapshot, analysis: analysis, config: config)
         state = .complete(run)
     }
 
@@ -133,26 +135,46 @@ final class TestCoordinator {
         untilStoppedFlag = true
     }
 
-    func cancel() {
+    /// Stop and keep current data (Stop button / Monitor Only finish).
+    func stopAndSave() {
         cancelledFlag = true
         Task { await telemetry.stopTelemetry() }
         stopWorkload()
+        state = Self.cancelledRecord(samples: samples, config: testConfig)
+            .map { State.cancelled($0) }
+            ?? .discarded
+    }
 
-        if !samples.isEmpty {
-            let snapshot = samples
-            let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
-            let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: testConfig)
-            run.wasInterrupted = true
-            run.phaseRaw = TestPhase.cancelled.rawValue
-            state = .cancelled
-        } else {
-            state = .cancelled
-        }
+    /// Discard current data without saving (Discard button).
+    func cancelAndDiscard() {
+        cancelledFlag = true
+        Task { await telemetry.stopTelemetry() }
+        stopWorkload()
+        samples.removeAll()
+        state = .discarded
+    }
+
+    /// Build a final RunRecord for an interrupted run. Returns nil when there
+    /// is nothing worth saving. Extracted so tests exercise the real path.
+    static func cancelledRecord(samples: [TelemetrySample], config: TestConfiguration) -> RunRecord? {
+        guard !samples.isEmpty else { return nil }
+        let snapshot = samples
+        let analysis = RunAnalyzer.analyze(samples: snapshot, config: config)
+        let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: config)
+        run.phaseRaw = TestPhase.cancelled.rawValue
+        run.wasInterrupted = true
+        return run
+    }
+
+    /// Unified cleanup: stops workloads, telemetry, and anything in flight.
+    private func cleanup() async {
+        await telemetry.stopTelemetry()
+        stopWorkload()
     }
 
     // MARK: - Run Construction
 
-    private func buildRunRecord(snapshot: [TelemetrySample], analysis: RunAnalysis, config: TestConfiguration) -> RunRecord {
+    private static func buildRunRecord(snapshot: [TelemetrySample], analysis: RunAnalysis, config: TestConfiguration) -> RunRecord {
         let run = RunRecord(config: config)
         run.sampleCount = analysis.sampleCount
         run.duration = analysis.duration
@@ -176,6 +198,7 @@ final class TestCoordinator {
         run.gpuPeakTemp = analysis.gpuPeakTemp ?? 0
         run.pClusterMinFreq = analysis.pCorePeakFreq ?? 0
         run.dataCoverage = analysis.overallCoverage
+        run.appVersion = BuildIdentity.appVersion
 
         // Power source snapshot (last sample)
         if let last = snapshot.last {

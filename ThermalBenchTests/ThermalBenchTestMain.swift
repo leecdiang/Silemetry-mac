@@ -323,6 +323,38 @@ func runAllTests() {
         try assertFalse(run.uuid.isEmpty)
     }
 
+    test("Cancel path: cancelledRecord builds full metrics record") {
+        var samples: [TelemetrySample] = []
+        for i in 0..<10 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = Double(i)
+            s.cpuTempHottest = Double(50 + i)
+            s.cpuTemp = Double(45 + i)
+            s.cpuPower = 5.0
+            s.tempValid = true
+            s.powerValid = true
+            samples.append(s)
+        }
+        let cfg = TestConfiguration()
+        let run = MainActor.assumeIsolated { () -> RunRecord? in
+            TestCoordinator.cancelledRecord(samples: samples, config: cfg)
+        }
+        try assertNotNil(run)
+        try assertTrue(run!.wasInterrupted)
+        try assertEqual(run!.phaseRaw, TestPhase.cancelled.rawValue)
+        try assertEqual(run!.sampleCount, 10)
+        try assertGreaterThan(run!.duration, 0)
+        try assertEqual(run!.cpuPeakTemp, 59.0)
+        try assertFalse(run!.appVersion.isEmpty)
+    }
+
+    test("Cancel path: empty samples discard — nil record") {
+        let run = MainActor.assumeIsolated { () -> RunRecord? in
+            TestCoordinator.cancelledRecord(samples: [], config: TestConfiguration())
+        }
+        try assertNil(run)
+    }
+
     // ── RunRecord device info ───────────────────────────────────────────
     test("RunRecord encodes device info") {
         let cfg = TestConfiguration(mode: .standard)

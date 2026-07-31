@@ -50,7 +50,11 @@ actor TelemetryService {
     private var sampleCount = 0
     private let queue = DispatchQueue(label: "com.leecdiang.thermalbench.telemetry")
 
-    func startTelemetry() async throws {
+    func startTelemetry(intervalMilliseconds: Int = 1000) async throws {
+        // Exclusive ownership: refuse to clobber an existing session.
+        guard !isRunning else {
+            throw TelemetryError.alreadyRunning
+        }
         isRunning = true
         startMonotonicNs = DispatchTime.now().uptimeNanoseconds
         sampleCount = 0
@@ -63,8 +67,8 @@ actor TelemetryService {
         }
         handle = h
 
-        // Start background sampling at 1000ms
-        let err = tb_telemetry_start(h, 1000)
+        // Start background sampling at the requested cadence (ms)
+        let err = tb_telemetry_start(h, UInt32(max(intervalMilliseconds, 100)))
         guard err == TB_OK else {
             tb_telemetry_destroy(h)
             handle = nil
@@ -241,12 +245,21 @@ private func collectPerCoreUtil() -> [PerCoreUtilization] {
     guard snap.core_count > 0 else { return [] }
 
     var result: [PerCoreUtilization] = []
+    var pIndex = 0, eIndex = 0, uIndex = 0
     for i in 0..<Int(snap.core_count) {
         let info = core_util_get_core(&snap, UInt32(i))
         let kind: CPUCoreKind = info.kind == 0 ? .efficiency : info.kind == 1 ? .performance : .unknown
+        // Per-kind ordinal: P1…Pn / E1…En / Unknown 1…n — independent of any
+        // hardcoded core layout. logicalCoreIndex stays available.
+        let displayIndex: Int
+        switch kind {
+        case .performance: pIndex += 1; displayIndex = pIndex
+        case .efficiency:  eIndex += 1; displayIndex = eIndex
+        case .unknown:     uIndex += 1; displayIndex = uIndex
+        }
         result.append(PerCoreUtilization(
             logicalCoreIndex: Int(info.logical_index),
-            displayIndex: Int(info.logical_index) + 1,
+            displayIndex: displayIndex,
             kind: kind,
             utilizationPercent: info.valid != 0 ? info.utilization_percent : nil,
             valid: info.valid != 0
@@ -258,6 +271,7 @@ private func collectPerCoreUtil() -> [PerCoreUtilization] {
 enum TelemetryError: Error, LocalizedError {
     case initialization(String)
     case notStarted
+    case alreadyRunning
     case timeout
     case stopped(String?)
     case readFailed(String)
@@ -266,6 +280,7 @@ enum TelemetryError: Error, LocalizedError {
         switch self {
         case .initialization(let msg): "Telemetry init failed: \(msg)"
         case .notStarted: "Telemetry not started"
+        case .alreadyRunning: "Telemetry already in use — a test may be running"
         case .timeout: "Telemetry read timeout"
         case .stopped(let detail):
             (detail?.isEmpty == false ? "Telemetry stopped: \(detail ?? "")" : "Telemetry stopped")

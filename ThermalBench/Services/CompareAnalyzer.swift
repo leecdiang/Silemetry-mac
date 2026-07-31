@@ -146,6 +146,7 @@ enum CompareAnalyzer {
         fields.append(checkNumericField(id: "threads", label: "CPU Threads",
                                         a: Double(a.cpuThreadCount), b: Double(b.cpuThreadCount),
                                         tolerance: 0, severity: .warning,
+                                        zeroIsLegacy: false,
                                         warnings: &warnings))
 
         fields.append(checkNumericField(id: "loadDuration", label: "Load Duration",
@@ -155,7 +156,7 @@ enum CompareAnalyzer {
 
         fields.append(checkNumericField(id: "sampleInterval", label: "Sample Interval",
                                         a: a.sampleInterval, b: b.sampleInterval,
-                                        tolerance: 0.05, severity: .info,
+                                        tolerance: 0.05, severity: .warning,
                                         warnings: &warnings))
 
         fields.append(checkPowerSource(a: a.acConnected, b: b.acConnected,
@@ -185,7 +186,7 @@ enum CompareAnalyzer {
         ))
         if !durMatch {
             warnings.append(ComparabilityWarning(
-                id: "duration_diff", field: "Duration", severity: .info,
+                id: "duration_diff", field: "Duration", severity: .warning,
                 detail: "Test durations differ by more than 30% (A: \(formatDuration(a.duration)), B: \(formatDuration(b.duration)))"
             ))
         }
@@ -277,6 +278,10 @@ enum CompareAnalyzer {
         let legacyB = isLegacy(b) && bLegacy.map(isLegacy) ?? true
 
         if legacyA && legacyB {
+            warnings.append(ComparabilityWarning(
+                id: "\(id)_both_legacy", field: label, severity: .info,
+                detail: "Both runs lack \(label.lowercased()) metadata — match unverifiable"
+            ))
             return ComparabilityField(
                 id: id, label: label,
                 valueA: "Legacy metadata unavailable",
@@ -325,18 +330,37 @@ enum CompareAnalyzer {
         return m > 0 ? "\(m)m \(s)s" : "\(s)s"
     }
 
-    /// Numeric field comparison. Zero on both sides = legacy/unknown.
+    /// Numeric field comparison. Zero on both sides = legacy/unknown, except
+    /// when zeroIsLegacy is false (e.g. threadCount where 0 means "all cores").
     private static func checkNumericField(
         id: String, label: String,
         a: Double, b: Double,
         tolerance: Double,          // 0 = exact match
         severity: ComparabilityWarning.Severity,
+        zeroIsLegacy: Bool = true,
         warnings: inout [ComparabilityWarning]
     ) -> ComparabilityField {
         let legacyA = a == 0
         let legacyB = b == 0
 
+        // 0 carries real meaning (all cores) — compare directly.
+        if !zeroIsLegacy {
+            let fmt: (Double) -> String = { $0 == 0 ? "All Cores" : formatNumber($0) }
+            let match = a == b
+            if !match {
+                warnings.append(ComparabilityWarning(
+                    id: "\(id)_diff", field: label, severity: severity,
+                    detail: "Different \(label.lowercased()) — A: \(fmt(a)), B: \(fmt(b))"
+                ))
+            }
+            return ComparabilityField(id: id, label: label, valueA: fmt(a), valueB: fmt(b), match: match)
+        }
+
         if legacyA && legacyB {
+            warnings.append(ComparabilityWarning(
+                id: "\(id)_both_legacy", field: label, severity: .info,
+                detail: "Both runs lack \(label.lowercased()) metadata — match unverifiable"
+            ))
             return ComparabilityField(
                 id: id, label: label,
                 valueA: "Legacy metadata unavailable",

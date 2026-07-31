@@ -58,42 +58,38 @@ enum RunAnalyzer {
             duration = 0
         }
 
-        // Temperature — peaks use hottest, averages use cpuTemp/gpuTemp
-        let validTemps = samples.compactMap { s -> (hottest: Double, cpu: Double, gpuHottest: Double?, gpu: Double?)? in
-            guard s.tempValid, let hottest = s.cpuTempHottest, let cpu = s.cpuTemp else { return nil }
-            return (hottest, cpu, s.gpuTempHottest, s.gpuTemp)
-        }
-        let cpuPeakTemp = validTemps.map(\.hottest).max()
-        let gpuPeakTemp = validTemps.compactMap(\.gpuHottest).max()
-        let cpuAvgTemp = validTemps.isEmpty ? nil : validTemps.map(\.cpu).reduce(0, +) / Double(validTemps.count)
-        let gpuAvgTemp = validTemps.compactMap(\.gpu).isEmpty ? nil :
-            validTemps.compactMap(\.gpu).reduce(0, +) / Double(validTemps.compactMap(\.gpu).count)
+        // Temperature — per-channel availability (nil field = channel absent).
+        // Peaks use hottest sensors; averages use average sensors.
+        let cpuPeakTemps = samples.compactMap(\.cpuTempHottest)
+        let cpuAvgTemps = samples.compactMap(\.cpuTemp)
+        let gpuPeakTemps = samples.compactMap(\.gpuTempHottest)
+        let gpuAvgTemps = samples.compactMap(\.gpuTemp)
+        let cpuPeakTemp = cpuPeakTemps.max()
+        let gpuPeakTemp = gpuPeakTemps.max()
+        let cpuAvgTemp = cpuAvgTemps.isEmpty ? nil : cpuAvgTemps.reduce(0, +) / Double(cpuAvgTemps.count)
+        let gpuAvgTemp = gpuAvgTemps.isEmpty ? nil : gpuAvgTemps.reduce(0, +) / Double(gpuAvgTemps.count)
 
-        // Power
-        let validPower = samples.compactMap { s -> (cpu: Double, gpu: Double, pkg: Double?)? in
-            guard s.powerValid, let cpu = s.cpuPower else { return nil }
-            return (cpu, s.gpuPower ?? 0, s.packagePower)
-        }
-        let cpuPeakPower = validPower.map(\.cpu).max()
-        let gpuPeakPower = validPower.map(\.gpu).max()
-        let packagePeakPower = validPower.compactMap(\.pkg).max()
-        let cpuAvgPower = validPower.isEmpty ? nil : validPower.map(\.cpu).reduce(0, +) / Double(validPower.count)
+        // Power — per-channel, never fabricate 0 for a missing channel.
+        let cpuPowers = samples.compactMap(\.cpuPower)
+        let gpuPowers = samples.compactMap(\.gpuPower)
+        let pkgPowers = samples.compactMap(\.packagePower)
+        let cpuPeakPower = cpuPowers.max()
+        let gpuPeakPower = gpuPowers.max()
+        let packagePeakPower = pkgPowers.max()
+        let cpuAvgPower = cpuPowers.isEmpty ? nil : cpuPowers.reduce(0, +) / Double(cpuPowers.count)
 
-        // Load-phase power average
+        // Load-phase CPU power average
         let loadSamples = valid.filter { $0.phase == .loading }
         let loadPowers = loadSamples.compactMap { $0.cpuPower }
         let loadAvgPower = loadPowers.isEmpty ? nil : loadPowers.reduce(0, +) / Double(loadPowers.count)
 
-        // Frequency
-        let validFreq = samples.compactMap { s -> (p: Double, e: Double?)? in
-            guard s.freqValid, let p = s.pClusterFreqMHz else { return nil }
-            return (p, s.eClusterFreqMHz)
-        }
-        let pCorePeakFreq = validFreq.map(\.p).max()
-        let eCorePeakFreq = validFreq.compactMap(\.e).max()
-        let pCoreAvgFreq = validFreq.isEmpty ? nil : validFreq.map(\.p).reduce(0, +) / Double(validFreq.count)
-        let eCoreAvgFreq = validFreq.compactMap(\.e).isEmpty ? nil :
-            validFreq.compactMap(\.e).reduce(0, +) / Double(validFreq.compactMap(\.e).count)
+        // Frequency — per-channel
+        let pFreqs = samples.compactMap(\.pClusterFreqMHz)
+        let eFreqs = samples.compactMap(\.eClusterFreqMHz)
+        let pCorePeakFreq = pFreqs.max()
+        let eCorePeakFreq = eFreqs.max()
+        let pCoreAvgFreq = pFreqs.isEmpty ? nil : pFreqs.reduce(0, +) / Double(pFreqs.count)
+        let eCoreAvgFreq = eFreqs.isEmpty ? nil : eFreqs.reduce(0, +) / Double(eFreqs.count)
 
         // Coverage
         let total = samples.count
