@@ -1,0 +1,14 @@
+# Build artifacts
+.build/
+build/
+dist/
+
+# Rust
+TelemetryCore/target/
+
+# macOS
+.DS_Store
+
+# Xcode user state
+*.xcuserstate
+xcuserdata/
