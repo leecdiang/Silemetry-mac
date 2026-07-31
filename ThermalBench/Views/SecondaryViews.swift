@@ -539,69 +539,99 @@ struct CompareView: View {
 
     @ViewBuilder
     func compareContent(a: RunRecord, b: RunRecord) -> some View {
-        let sa = decodeSamples(run: a)
-        let sb = decodeSamples(run: b)
+        let result = CompareAnalyzer.analyze(a: a, b: b)
+        let sa = result.canCompare ? decodeSamples(run: a) : []
+        let sb = result.canCompare ? decodeSamples(run: b) : []
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Comparability
-                GroupBox("Comparability") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        let sameDevice = (a.deviceModelIdentifier.isEmpty && a.chipName.isEmpty) || (b.deviceModelIdentifier.isEmpty && b.chipName.isEmpty) ? nil : a.deviceModelIdentifier == b.deviceModelIdentifier
-                        if sameDevice == nil {
-                            Label("Unknown — legacy run", systemImage: "questionmark.circle")
-                                .foregroundStyle(.secondary)
-                        } else if sameDevice == true {
-                            Label("Same device", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(a.deviceSummary).font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Label("Different devices", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("A: \(a.deviceSummary)").font(.caption).foregroundStyle(.secondary)
-                                Text("B: \(b.deviceSummary)").font(.caption).foregroundStyle(.secondary)
+                // ── Comparability Verdict ──
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: result.level.icon)
+                                .foregroundStyle(levelColor(result.level))
+                                .font(.title3)
+                            Text(result.level.displayName)
+                                .font(.headline)
+                                .foregroundStyle(levelColor(result.level))
+                        }
+
+                        if !result.warnings.isEmpty {
+                            Divider()
+                            ForEach(result.warnings) { w in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Image(systemName: severityIcon(w.severity))
+                                        .font(.caption)
+                                        .foregroundStyle(severityColor(w.severity))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(w.field).font(.caption).bold()
+                                        Text(w.detail).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
-                        if a.sampleCount > 0 && b.sampleCount > 0 {
-                            Label("Both have samples", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                        if a.dataCoverage > 0 && b.dataCoverage > 0 {
-                            Label("Coverage ok", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                    }
+                }
+
+                // ── Field-by-field comparison ──
+                if !result.fields.isEmpty {
+                    GroupBox("Comparison Details") {
+                        Grid(horizontalSpacing: 12, verticalSpacing: 6) {
+                            GridRow {
+                                Text("Field").bold().gridColumnAlignment(.leading)
+                                Text("Run A").bold().frame(maxWidth: .infinity, alignment: .leading)
+                                Text("Run B").bold().frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .font(.caption)
+                            Divider()
+                            ForEach(result.fields) { f in
+                                GridRow {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: f.match ? "checkmark.circle.fill" : "circle")
+                                            .font(.caption2)
+                                            .foregroundStyle(f.match ? .green : .secondary)
+                                        Text(f.label)
+                                    }
+                                    Text(f.valueA).lineLimit(2)
+                                    Text(f.valueB).lineLimit(2)
+                                }
+                                .font(.caption)
+                            }
                         }
                     }
                 }
 
-                // Summary Table
-                GroupBox("Comparison Summary") {
-                    Grid(horizontalSpacing: 20, verticalSpacing: 8) {
-                        GridRow {
-                            Text("Metric").bold().gridColumnAlignment(.leading)
-                            Text("Test A").bold().frame(width: 80)
-                            Text("Test B").bold().frame(width: 80)
-                            Text("Delta").bold().frame(width: 80)
+                // ── Summary Table (only if comparable) ──
+                if result.canCompare {
+                    GroupBox("Metrics") {
+                        Grid(horizontalSpacing: 20, verticalSpacing: 8) {
+                            GridRow {
+                                Text("Metric").bold().gridColumnAlignment(.leading)
+                                Text("Run A").bold().frame(width: 80)
+                                Text("Run B").bold().frame(width: 80)
+                                Text("Δ").bold().frame(width: 80)
+                            }
+                            .font(.caption)
+                            Divider()
+                            compareRow("Duration", a: durationStr(a.duration), b: durationStr(b.duration))
+                            compareRow("Samples", a: "\(a.sampleCount)", b: "\(b.sampleCount)")
+                            compareMetric("CPU Peak Temp", a: a.cpuPeakTemp, b: b.cpuPeakTemp, unit: "°C")
+                            compareMetric("GPU Peak Temp", a: a.gpuPeakTemp, b: b.gpuPeakTemp, unit: "°C")
+                            compareMetric("CPU Peak Power", a: a.cpuPeakPower, b: b.cpuPeakPower, unit: "W")
+                            compareRow("P-Cluster Peak",
+                                       a: pFreqStr(a.pClusterMinFreq),
+                                       b: pFreqStr(b.pClusterMinFreq))
+                            compareRow("Coverage",
+                                       a: pctStr(a.dataCoverage),
+                                       b: pctStr(b.dataCoverage))
                         }
                         .font(.caption)
-                        Divider()
-                        compareRow("Duration", a: durationStr(a.duration), b: durationStr(b.duration))
-                        compareRow("Samples", a: "\(a.sampleCount)", b: "\(b.sampleCount)")
-                        compareMetric("CPU Peak Temp", a: a.cpuPeakTemp, b: b.cpuPeakTemp, unit: "°C")
-                        compareMetric("GPU Peak Temp", a: a.gpuPeakTemp, b: b.gpuPeakTemp, unit: "°C")
-                        compareMetric("CPU Peak Power", a: a.cpuPeakPower, b: b.cpuPeakPower, unit: "W")
-                        compareRow("P-Cluster Peak",
-                                   a: pFreqStr(a.pClusterMinFreq),
-                                   b: pFreqStr(b.pClusterMinFreq))
-                        compareRow("Coverage",
-                                   a: pctStr(a.dataCoverage),
-                                   b: pctStr(b.dataCoverage))
                     }
-                    .font(.caption)
                 }
 
-                // Overlay Charts
-                if !sa.isEmpty || !sb.isEmpty {
+                // Overlay Charts — only when comparable
+                if result.canCompare, !sa.isEmpty || !sb.isEmpty {
                     GroupBox("Temperature Comparison") {
                         Chart {
                             ForEach(sa, id: \.id) { s in
@@ -636,6 +666,34 @@ struct CompareView: View {
         }
         .font(.caption)
     }
+
+    // MARK: - Compare Helpers
+
+    func levelColor(_ level: ComparabilityLevel) -> Color {
+        switch level {
+        case .highlyComparable:       .green
+        case .comparableWithWarnings: .orange
+        case .invalid:                .red
+        }
+    }
+
+    func severityIcon(_ s: ComparabilityWarning.Severity) -> String {
+        switch s {
+        case .info:    "info.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error:   "xmark.circle.fill"
+        }
+    }
+
+    func severityColor(_ s: ComparabilityWarning.Severity) -> Color {
+        switch s {
+        case .info:    .secondary
+        case .warning: .orange
+        case .error:   .red
+        }
+    }
+
+    // MARK: - Legacy helpers (kept for compatibility)
 
     func compareMetric(_ label: String, a: Double, b: Double, unit: String) -> some View {
         let aAvail = a > 0
@@ -681,38 +739,267 @@ struct CompareView: View {
 
 // MARK: - Diagnostics View
 
+// MARK: - Diagnostics
+
+private struct ProbeResult {
+    var tempOK: Bool?
+    var powerOK: Bool?
+    var freqOK: Bool?
+    var tempHottest: Double?
+    var cpuPower: Double?
+    var pFreq: Double?
+    var battery: Int?
+    var ac: Bool?
+    var error: String?
+}
+
+private struct DiagnosticRow: View {
+    let icon: String
+    let iconColor: Color
+    let label: String
+    let value: String
+    var status: Color? = nil
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(iconColor.opacity(0.14)))
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let status {
+                Circle().fill(status).frame(width: 8, height: 8)
+            }
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private func diagCardBackground(cornerRadius: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+}
+
+private struct DiagSection<Content: View>: View {
+    let title: String
+    let icon: String
+    let tint: Color
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(title).textCase(.uppercase)
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(tint)
+            Divider()
+            content
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(diagCardBackground(cornerRadius: 14))
+    }
+}
+
 struct DiagnosticsView: View {
+    @State private var probe: ProbeResult? = nil
+    @State private var isProbing = false
+
     var body: some View {
         let dev = DeviceProfile.current
         return ScrollView {
-            GroupBox("App") {
-                LabeledContent("Version", value: BuildIdentity.appVersion)
-                LabeledContent("Git Commit", value: BuildIdentity.gitSHA)
-                LabeledContent("Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
-                LabeledContent("Model Identifier", value: dev.modelIdentifier)
-                LabeledContent("Chip", value: dev.chipName)
-                LabeledContent("Cores", value: dev.coreSummary)
-                LabeledContent("Memory", value: dev.formattedMemory)
-                LabeledContent("macOS", value: dev.macOSVersion)
-                LabeledContent("Metal Device", value: dev.metalDeviceName ?? "N/A")
-                if let gpu = dev.gpuCoreCount { LabeledContent("GPU Cores", value: "\(gpu)") }
-                LabeledContent("Low Power Mode", value: ProcessInfo.processInfo.isLowPowerModeEnabled ? "ON" : "OFF")
+            VStack(alignment: .leading, spacing: 20) {
+                deviceHeader(dev)
+                selfCheckCard()
+
+                DiagSection(title: "App", icon: "app.badge", tint: .blue) {
+                    DiagnosticRow(icon: "number", iconColor: .blue, label: "Version", value: BuildIdentity.appVersion)
+                    DiagnosticRow(icon: "chevron.left.forwardslash.chevron.right", iconColor: .blue, label: "Git Commit", value: BuildIdentity.gitSHA)
+                    DiagnosticRow(icon: "clock", iconColor: .blue, label: "Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
+                    DiagnosticRow(icon: "macbook", iconColor: .blue, label: "Model Identifier", value: dev.modelIdentifier)
+                    DiagnosticRow(icon: "cpu", iconColor: .blue, label: "Chip", value: dev.chipName)
+                    DiagnosticRow(icon: "circle.grid.2x2", iconColor: .blue, label: "Cores", value: dev.coreSummary)
+                    DiagnosticRow(icon: "memorychip", iconColor: .blue, label: "Memory", value: dev.formattedMemory)
+                    DiagnosticRow(icon: "apple.logo", iconColor: .blue, label: "macOS", value: dev.macOSVersion)
+                    DiagnosticRow(icon: "square.3.layers.3d", iconColor: .blue, label: "Metal Device",
+                                 value: dev.metalDeviceName ?? "N/A",
+                                 status: dev.metalDeviceName == nil ? .yellow : .green)
+                    if let gpu = dev.gpuCoreCount {
+                        DiagnosticRow(icon: "gpu", iconColor: .blue, label: "GPU Cores", value: "\(gpu)")
+                    }
+                    DiagnosticRow(icon: "leaf", iconColor: .blue, label: "Low Power Mode",
+                                 value: ProcessInfo.processInfo.isLowPowerModeEnabled ? "ON" : "OFF",
+                                 status: ProcessInfo.processInfo.isLowPowerModeEnabled ? .yellow : .green)
+                }
+
+                DiagSection(title: "Telemetry", icon: "waveform.path.ecg", tint: .orange) {
+                    DiagnosticRow(icon: "shippingbox", iconColor: .orange, label: "Core", value: "Embedded Rust macmon (vendored)")
+                    DiagnosticRow(icon: "thermometer.medium", iconColor: .orange, label: "Temperature", value: "Apple SMC sensor aggregation")
+                    DiagnosticRow(icon: "bolt.fill", iconColor: .orange, label: "Power", value: "IOReport via embedded library")
+                    DiagnosticRow(icon: "waveform", iconColor: .orange, label: "Frequency", value: "IOReport via embedded library")
+                    DiagnosticRow(icon: "square.grid.3x3", iconColor: .orange, label: "Per-Core", value: "\(dev.coreSummary) via host_processor_info")
+                    DiagnosticRow(icon: "lock.shield", iconColor: .orange, label: "Privileges", value: "No sudo")
+                    DiagnosticRow(icon: "externaldrive", iconColor: .orange, label: "External Processes", value: "None")
+                }
+
+                DiagSection(title: "Battery", icon: "battery.75percent", tint: .green) {
+                    DiagnosticRow(icon: "battery.75percent", iconColor: .green, label: "Source", value: "IOPowerSources (public API)")
+                }
             }
-            GroupBox("Telemetry") {
-                LabeledContent("Core", value: "Embedded Rust macmon (vendored)")
-                LabeledContent("Temperature", value: "Apple SMC sensor aggregation")
-                LabeledContent("Power", value: "IOReport via embedded library")
-                LabeledContent("Frequency", value: "IOReport via embedded library")
-                LabeledContent("Per-Core", value: "\(dev.coreSummary) via host_processor_info")
-                LabeledContent("Privileges", value: "No sudo")
-                LabeledContent("External Processes", value: "None")
+            .padding(24)
+        }
+        .navigationTitle("Diagnostics")
+    }
+
+    // MARK: - Device summary card
+
+    private func deviceHeader(_ dev: DeviceProfile) -> some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(LinearGradient(colors: [.blue.opacity(0.85), .purple.opacity(0.75)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 64, height: 64)
+                Image(systemName: "cpu")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.white)
             }
-            GroupBox("Battery") {
-                LabeledContent("Source", value: "IOPowerSources (public API)")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(dev.chipName)
+                    .font(.title2.weight(.semibold))
+                Text("\(dev.modelIdentifier) · \(dev.coreSummary) · \(dev.formattedMemory)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Text(dev.macOSVersion)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(20)
+        .background(diagCardBackground(cornerRadius: 18))
+    }
+
+    // MARK: - Live one-shot probe
+
+    private func selfCheckCard() -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "stethoscope")
+                    Text("Quick Self-Check").textCase(.uppercase)
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.purple)
+                Spacer()
+                if isProbing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button {
+                        runProbe()
+                    } label: {
+                        Label("Run", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.purple)
+                }
+            }
+            Divider()
+
+            if let probe {
+                if let err = probe.error {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.red)
+                } else {
+                    VStack(spacing: 10) {
+                        probeRow(icon: "thermometer.medium", color: .orange, label: "Temperature",
+                                 ok: probe.tempOK,
+                                 value: probe.tempHottest.map { String(format: "%.1f°C", $0) } ?? "—")
+                        probeRow(icon: "bolt.fill", color: .yellow, label: "Power",
+                                 ok: probe.powerOK,
+                                 value: probe.cpuPower.map { String(format: "%.1f W", $0) } ?? "—")
+                        probeRow(icon: "waveform", color: .teal, label: "Frequency",
+                                 ok: probe.freqOK,
+                                 value: probe.pFreq.map { String(format: "%.0f MHz", $0) } ?? "—")
+                        probeRow(icon: "battery.75percent", color: .green, label: "Power Source",
+                                 ok: probe.ac != nil,
+                                 value: (probe.ac == true ? "AC" : probe.ac == false ? "Battery" : "Unknown")
+                                     + (probe.battery.map { " · \($0)%" } ?? ""))
+                    }
+                }
+            } else if !isProbing {
+                Text("Run a live one-shot probe to verify temperature, power, frequency and power-source channels.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(32)
-        .navigationTitle("Diagnostics")
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(diagCardBackground(cornerRadius: 14))
+    }
+
+    private func probeRow(icon: String, color: Color, label: String, ok: Bool?, value: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(color.opacity(0.14)))
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Circle()
+                .fill(ok == true ? .green : (ok == false ? .red : .gray))
+                .frame(width: 8, height: 8)
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func runProbe() {
+        isProbing = true
+        probe = nil
+        let ts = TelemetryService.shared
+        Task {
+            do {
+                try await ts.startTelemetry()
+                let s = try await ts.readSample()
+                await ts.stopTelemetry()
+                probe = ProbeResult(
+                    tempOK: s.tempValid,
+                    powerOK: s.powerValid,
+                    freqOK: s.freqValid,
+                    tempHottest: s.cpuTempHottest,
+                    cpuPower: s.cpuPower,
+                    pFreq: s.pClusterFreqMHz,
+                    battery: s.batteryPercent,
+                    ac: s.acConnected
+                )
+                isProbing = false
+            } catch {
+                await ts.stopTelemetry()
+                probe = ProbeResult(error: error.localizedDescription)
+                isProbing = false
+            }
+        }
     }
 }
 
