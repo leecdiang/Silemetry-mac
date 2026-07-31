@@ -1,0 +1,26 @@
+# ── Build output ──────────────────────────────────────────────────────
+# Scripts/build_app.sh writes intermediates to build/ and the bundle to dist/.
+build/
+dist/
+*.app
+
+# ── Rust ──────────────────────────────────────────────────────────────
+# Cargo.lock IS tracked on purpose: TelemetryCore builds a staticlib that ships
+# inside the app, so the resolved dependency set needs to be reproducible.
+TelemetryCore/target/
+vendor/**/target/
+
+# ── Swift / Xcode ─────────────────────────────────────────────────────
+.build/
+.swiftpm/
+Package.resolved
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# Note: Docs/Artifacts/*.log is deliberately NOT ignored — the probe logs there
+# are committed as reference output for the sensor/IOReport investigations.
+
+# ── macOS ─────────────────────────────────────────────────────────────
+.DS_Store
+._*
