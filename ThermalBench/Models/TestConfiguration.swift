@@ -127,6 +127,16 @@ final class RunRecord {
     var sampleCount: Int = 0
     var duration: TimeInterval = 0
 
+    // ── Configuration snapshot (empty/zero = legacy run) ──
+    var workloadTypeRaw: String = ""
+    var cpuCoreTypeRaw: String = ""
+    var gpuIntensityRaw: String = ""
+    var cpuThreadCount: Int = 0
+    var loadDuration: TimeInterval = 0
+    var sampleInterval: TimeInterval = 0
+    var acConnected: Bool?
+    var batteryPercent: Int?
+
     // ── Summary metrics ──
     var cpuPeakPower: Double = 0
     var cpuPeakTemp: Double = 0
@@ -164,6 +174,14 @@ final class RunRecord {
         self.testModeRaw = config.mode.rawValue
         self.tags = config.tags
         self.notes = config.notes
+
+        // Configuration snapshot for comparability checks
+        self.workloadTypeRaw = config.workloadType.rawValue
+        self.cpuCoreTypeRaw = config.cpuCoreType.rawValue
+        self.gpuIntensityRaw = config.gpuIntensity.rawValue
+        self.cpuThreadCount = config.cpuThreads
+        self.loadDuration = config.loadDuration
+        self.sampleInterval = config.sampleInterval
     }
 }
 

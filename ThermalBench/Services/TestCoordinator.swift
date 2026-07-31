@@ -177,6 +177,12 @@ final class TestCoordinator {
         run.pClusterMinFreq = analysis.pCorePeakFreq ?? 0
         run.dataCoverage = analysis.overallCoverage
 
+        // Power source snapshot (last sample)
+        if let last = snapshot.last {
+            run.acConnected = last.acConnected
+            run.batteryPercent = last.batteryPercent
+        }
+
         if let data = try? JSONEncoder().encode(snapshot),
            let json = String(data: data, encoding: .utf8) {
             run.dataDirectory = json

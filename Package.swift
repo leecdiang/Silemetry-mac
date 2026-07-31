@@ -12,9 +12,8 @@ let package = Package(
             name: "ThermalBench",
             path: "ThermalBench",
             exclude: ["Resources", "Localizations", "Assets.xcassets"],
-            sources: ["App", "Models", "Views", "Services", "Telemetry", "Workload", "Analysis", "Persistence", "Export", "Diagnostics"],
+            sources: ["App", "Models", "Views", "Services"],
             linkerSettings: [
-                .linkedLibrary("TelemetryCore"),
                 .unsafeFlags(["-L\(Context.packageDirectory)/build"]),
             ]
         ),
