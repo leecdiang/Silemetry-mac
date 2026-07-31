@@ -22,11 +22,7 @@ struct ResultsView: View {
     }
 
     private var storedSamples: [TelemetrySample] {
-        guard let json = run.dataDirectory.data(using: .utf8),
-              let samples = try? JSONDecoder().decode([TelemetrySample].self, from: json) else {
-            return []
-        }
-        return samples
+        SampleArchive.load(from: run)
     }
 
     var body: some View {
@@ -447,6 +443,7 @@ struct HistoryView: View {
     private func deleteRun(_ run: RunRecord) {
         // Clear Compare selections if they reference this run
         run.dataDirectory = ""
+        SampleArchive.deleteFiles(for: run)
         modelContext.delete(run)
         try? modelContext.save()
 
@@ -727,12 +724,7 @@ struct CompareView: View {
     }
 
     func decodeSamples(run: RunRecord) -> [TelemetrySample] {
-        guard let json = run.dataDirectory.data(using: .utf8),
-              let samples = try? JSONDecoder().decode([TelemetrySample].self, from: json),
-              !samples.isEmpty else {
-            return []
-        }
-        return samples
+        SampleArchive.load(from: run)
     }
 }
 

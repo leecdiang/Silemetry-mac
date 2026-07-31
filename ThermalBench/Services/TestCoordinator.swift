@@ -24,6 +24,10 @@ final class TestCoordinator {
     private let maxSamples = 7200
     private var cancelledFlag = false
     private var untilStoppedFlag = false
+    /// UUID for the run being recorded — determines the archive file path.
+    private var runUUID = UUID().uuidString
+    /// Samples awaiting flush to the archive file (streamed, not held forever).
+    private var archiveBuffer: [TelemetrySample] = []
 
     var testConfig = TestConfiguration()
     var testModeRaw: String = ""
@@ -38,6 +42,9 @@ final class TestCoordinator {
         currentPhase = .baseline
         cancelledFlag = false
         untilStoppedFlag = false
+        runUUID = UUID().uuidString
+        archiveBuffer.removeAll(keepingCapacity: true)
+        samples.removeAll()
         state = .running(.preflight, elapsed: 0, remaining: totalDuration(config))
 
         do { try await telemetry.startTelemetry(intervalMilliseconds: Int(config.sampleInterval * 1000)) }
@@ -58,6 +65,11 @@ final class TestCoordinator {
                     samples.append(sample)
                     if samples.count > maxSamples { samples.removeFirst() }
                     latest = sample
+                    archiveBuffer.append(sample)
+                    if archiveBuffer.count >= SampleArchive.batchSize {
+                        SampleArchive.append(archiveBuffer, uuid: runUUID)
+                        archiveBuffer.removeAll(keepingCapacity: true)
+                    }
                 } catch {
                     consecutiveReadFailures += 1
                     lastTelemetryError = error.localizedDescription
@@ -103,6 +115,11 @@ final class TestCoordinator {
                         samples.append(sample)
                         if samples.count > maxSamples { samples.removeFirst() }
                         latest = sample
+                        archiveBuffer.append(sample)
+                        if archiveBuffer.count >= SampleArchive.batchSize {
+                            SampleArchive.append(archiveBuffer, uuid: runUUID)
+                            archiveBuffer.removeAll(keepingCapacity: true)
+                        }
                     } catch {
                         consecutiveReadFailures += 1
                         lastTelemetryError = error.localizedDescription
@@ -123,10 +140,14 @@ final class TestCoordinator {
 
         await cleanup()
 
+        // Flush any buffered samples, then build the record with the archive path.
+        flushArchive()
+
         // Build RunRecord
         let snapshot = samples
         let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
-        let run = Self.buildRunRecord(snapshot: snapshot, analysis: analysis, config: config)
+        let run = Self.buildRunRecord(snapshot: snapshot, analysis: analysis, config: config,
+                                      archivePath: archivePath())
         state = .complete(run)
     }
 
@@ -135,12 +156,15 @@ final class TestCoordinator {
         untilStoppedFlag = true
     }
 
+
+
     /// Stop and keep current data (Stop button / Monitor Only finish).
     func stopAndSave() {
         cancelledFlag = true
         Task { await telemetry.stopTelemetry() }
         stopWorkload()
-        state = Self.cancelledRecord(samples: samples, config: testConfig)
+        flushArchive()
+        state = Self.cancelledRecord(samples: samples, config: testConfig, archivePath: archivePath())
             .map { State.cancelled($0) }
             ?? .discarded
     }
@@ -151,16 +175,31 @@ final class TestCoordinator {
         Task { await telemetry.stopTelemetry() }
         stopWorkload()
         samples.removeAll()
+        archiveBuffer.removeAll()
+        SampleArchive.deleteFiles(uuid: runUUID)
         state = .discarded
+    }
+
+    /// Flush buffered samples to the archive file.
+    private func flushArchive() {
+        guard !archiveBuffer.isEmpty else { return }
+        SampleArchive.append(archiveBuffer, uuid: runUUID)
+        archiveBuffer.removeAll(keepingCapacity: true)
+    }
+
+    private func archivePath() -> String? {
+        SampleArchive.samplesFile(for: runUUID).path
     }
 
     /// Build a final RunRecord for an interrupted run. Returns nil when there
     /// is nothing worth saving. Extracted so tests exercise the real path.
-    static func cancelledRecord(samples: [TelemetrySample], config: TestConfiguration) -> RunRecord? {
+    static func cancelledRecord(samples: [TelemetrySample], config: TestConfiguration,
+                                archivePath: String? = nil) -> RunRecord? {
         guard !samples.isEmpty else { return nil }
         let snapshot = samples
         let analysis = RunAnalyzer.analyze(samples: snapshot, config: config)
-        let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: config)
+        let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: config,
+                                 archivePath: archivePath)
         run.phaseRaw = TestPhase.cancelled.rawValue
         run.wasInterrupted = true
         return run
@@ -174,7 +213,8 @@ final class TestCoordinator {
 
     // MARK: - Run Construction
 
-    private static func buildRunRecord(snapshot: [TelemetrySample], analysis: RunAnalysis, config: TestConfiguration) -> RunRecord {
+    private static func buildRunRecord(snapshot: [TelemetrySample], analysis: RunAnalysis, config: TestConfiguration,
+                                       archivePath: String?) -> RunRecord {
         let run = RunRecord(config: config)
         run.sampleCount = analysis.sampleCount
         run.duration = analysis.duration
@@ -200,14 +240,22 @@ final class TestCoordinator {
         run.dataCoverage = analysis.overallCoverage
         run.appVersion = BuildIdentity.appVersion
 
-        // Power source snapshot (last sample)
+        // Analysis provenance
+        run.analysisVersion = CompareAnalyzer.analysisVersion
+        run.telemetryCoreVersion = String(cString: tb_telemetry_core_version())
+
+        // Power source + low-power-mode snapshot (last sample)
         if let last = snapshot.last {
             run.acConnected = last.acConnected
             run.batteryPercent = last.batteryPercent
+            run.lowPowerMode = last.lowPowerMode
         }
 
-        if let data = try? JSONEncoder().encode(snapshot),
-           let json = String(data: data, encoding: .utf8) {
+        // Samples: new file-backed archive, or legacy inline JSON.
+        if let archivePath {
+            run.dataDirectory = archivePath
+        } else if let data = try? JSONEncoder().encode(snapshot),
+                  let json = String(data: data, encoding: .utf8) {
             run.dataDirectory = json
         }
 

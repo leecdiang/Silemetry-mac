@@ -163,6 +163,37 @@ enum CompareAnalyzer {
                                        aBattery: a.batteryPercent, bBattery: b.batteryPercent,
                                        warnings: &warnings))
 
+        // ── Extended environment / provenance ───────────────────────────
+
+        fields.append(checkOptionalBoolField(id: "powerMode", label: "Low Power Mode",
+                                             a: a.lowPowerMode, b: b.lowPowerMode,
+                                             warnings: &warnings))
+
+        fields.append(checkNumericField(id: "ambient", label: "Ambient Temp",
+                                        a: a.ambientTemperature, b: b.ambientTemperature,
+                                        tolerance: 0, severity: .info,
+                                        warnings: &warnings))
+
+        fields.append(checkNumericField(id: "analysisVer", label: "Analysis Version",
+                                        a: Double(a.analysisVersion), b: Double(b.analysisVersion),
+                                        tolerance: 0, severity: .warning,
+                                        warnings: &warnings))
+
+        fields.append(checkNumericField(id: "baseline", label: "Baseline Duration",
+                                        a: a.baselineDuration, b: b.baselineDuration,
+                                        tolerance: 0.10, severity: .warning,
+                                        warnings: &warnings))
+
+        fields.append(checkNumericField(id: "cooldown", label: "Cooldown Duration",
+                                        a: a.cooldownDuration, b: b.cooldownDuration,
+                                        tolerance: 0.10, severity: .warning,
+                                        warnings: &warnings))
+
+        fields.append(checkField(id: "telemetryVer", label: "Telemetry Core",
+                                 a: a.telemetryCoreVersion, b: b.telemetryCoreVersion,
+                                 aLegacy: nil, bLegacy: nil,
+                                 warnings: &warnings))
+
         // workloadType — not stored directly; infer from testModeRaw + metrics
         // For now, flag if modes differ
         let aCpuUsed = !a.cpuPeakPower.isZero
@@ -437,6 +468,43 @@ enum CompareAnalyzer {
             ))
         }
         return ComparabilityField(id: "power", label: "Power Source", valueA: labelA, valueB: labelB, match: false)
+    }
+
+    /// Optional Bool comparison (nil = unknown on either side).
+    private static func checkOptionalBoolField(
+        id: String, label: String,
+        a: Bool?, b: Bool?,
+        warnings: inout [ComparabilityWarning]
+    ) -> ComparabilityField {
+        let fmt: (Bool?) -> String = { $0.map { $0 ? "ON" : "OFF" } ?? "Unknown" }
+
+        if let a, let b {
+            let match = a == b
+            if !match {
+                warnings.append(ComparabilityWarning(
+                    id: "\(id)_diff", field: label, severity: .warning,
+                    detail: "Different \(label.lowercased()) — A: \(fmt(a)), B: \(fmt(b))"
+                ))
+            }
+            return ComparabilityField(id: id, label: label, valueA: fmt(a), valueB: fmt(b), match: match)
+        }
+
+        if a == nil && b == nil {
+            return ComparabilityField(id: id, label: label, valueA: "Unknown", valueB: "Unknown", match: true)
+        }
+        if a == nil {
+            warnings.append(ComparabilityWarning(
+                id: "\(id)_legacy_a", field: label, severity: .info,
+                detail: "Run A: \(label.lowercased()) unknown"
+            ))
+        }
+        if b == nil {
+            warnings.append(ComparabilityWarning(
+                id: "\(id)_legacy_b", field: label, severity: .info,
+                detail: "Run B: \(label.lowercased()) unknown"
+            ))
+        }
+        return ComparabilityField(id: id, label: label, valueA: fmt(a), valueB: fmt(b), match: false)
     }
 
     private static func powerLabel(ac: Bool?, battery: Int?) -> String {

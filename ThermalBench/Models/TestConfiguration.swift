@@ -137,6 +137,14 @@ final class RunRecord {
     var acConnected: Bool?
     var batteryPercent: Int?
 
+    // ── Extended snapshot (analysis provenance / environment) ──
+    var lowPowerMode: Bool?
+    var ambientTemperature: Double = 0
+    var analysisVersion: Int = 0
+    var baselineDuration: TimeInterval = 0
+    var cooldownDuration: TimeInterval = 0
+    var telemetryCoreVersion: String = ""
+
     // ── Summary metrics ──
     var cpuPeakPower: Double = 0
     var cpuPeakTemp: Double = 0
@@ -182,6 +190,9 @@ final class RunRecord {
         self.cpuThreadCount = config.cpuThreads
         self.loadDuration = config.loadDuration
         self.sampleInterval = config.sampleInterval
+        self.ambientTemperature = config.ambientTemperature
+        self.baselineDuration = config.idleDuration
+        self.cooldownDuration = config.cooldownDuration
     }
 }
 

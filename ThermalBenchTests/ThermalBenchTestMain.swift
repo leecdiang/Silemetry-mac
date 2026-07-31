@@ -71,7 +71,13 @@ extension RunRecord {
         loadDuration: TimeInterval = 900,
         sampleInterval: TimeInterval = 1.0,
         ac: Bool? = true,
-        battery: Int? = 80
+        battery: Int? = 80,
+        lowPower: Bool? = false,
+        ambient: Double = 25,
+        analysisVersion: Int = 1,
+        baseline: TimeInterval = 180,
+        cooldown: TimeInterval = 300,
+        telemetryVer: String = "ThermalBenchTelemetryCore 0.1.0"
     ) -> RunRecord {
         let cfg = TestConfiguration(mode: .standard)
         let run = RunRecord(config: cfg)
@@ -98,6 +104,12 @@ extension RunRecord {
         run.sampleInterval = sampleInterval
         run.acConnected = ac
         run.batteryPercent = battery
+        run.lowPowerMode = lowPower
+        run.ambientTemperature = ambient
+        run.analysisVersion = analysisVersion
+        run.baselineDuration = baseline
+        run.cooldownDuration = cooldown
+        run.telemetryCoreVersion = telemetryVer
         return run
     }
 }
@@ -265,6 +277,80 @@ func runAllTests() {
         let r = CompareAnalyzer.analyze(a: a, b: b)
         try assertEqual(r.level, .comparableWithWarnings)
         try assertTrue(r.warnings.contains { $0.id == "power_diff" })
+    }
+
+    // ── Compare: extended provenance ───────────────────────────────────
+    test("Compare: different analysis version warns") {
+        let a = RunRecord.make(analysisVersion: 1)
+        let b = RunRecord.make(analysisVersion: 2)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.warnings.contains { $0.field == "Analysis Version" })
+    }
+
+    test("Compare: different baseline warns") {
+        let a = RunRecord.make(baseline: 180)
+        let b = RunRecord.make(baseline: 60)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.warnings.contains { $0.id == "baseline_diff" })
+    }
+
+    test("Compare: different cooldown warns") {
+        let a = RunRecord.make(cooldown: 300)
+        let b = RunRecord.make(cooldown: 120)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertTrue(r.warnings.contains { $0.id == "cooldown_diff" })
+    }
+
+    test("Compare: low power mode differs warns") {
+        let a = RunRecord.make(lowPower: false)
+        let b = RunRecord.make(lowPower: true)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.warnings.contains { $0.id == "powerMode_diff" })
+    }
+
+    test("Compare: ambient diff flagged (info, no downgrade)") {
+        let a = RunRecord.make(ambient: 25)
+        let b = RunRecord.make(ambient: 30)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        let f = r.fields.first { $0.id == "ambient" }
+        try assertNotNil(f)
+        try assertFalse(f!.match)
+        try assertEqual(r.level, .highlyComparable)
+    }
+
+    // ── SampleArchive ──────────────────────────────────────────────────
+    test("SampleArchive JSONL round-trip") {
+        var samples: [TelemetrySample] = []
+        for i in 0..<12 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = Double(i)
+            s.cpuTempHottest = Double(i)
+            samples.append(s)
+        }
+        let uuid = "test-\(UUID().uuidString)"
+        SampleArchive.append(samples, uuid: uuid)
+        let run = RunRecord(config: TestConfiguration())
+        run.dataDirectory = SampleArchive.samplesFile(for: uuid).path
+        let loaded = SampleArchive.load(from: run)
+        try assertEqual(loaded.count, 12)
+        try assertEqual(loaded.last!.elapsedSeconds, 11.0)
+        SampleArchive.deleteFiles(uuid: uuid)
+    }
+
+    test("SampleArchive legacy inline JSON still loads") {
+        var samples: [TelemetrySample] = []
+        var s = TelemetrySample()
+        s.cpuTempHottest = 61.5
+        samples.append(s)
+        let run = RunRecord(config: TestConfiguration())
+        let data = try! JSONEncoder().encode(samples)
+        run.dataDirectory = String(data: data, encoding: .utf8)!
+        let loaded = SampleArchive.load(from: run)
+        try assertEqual(loaded.count, 1)
+        try assertEqual(loaded.first!.cpuTempHottest!, 61.5)
     }
 
     // ── DeviceProfile codable ───────────────────────────────────────────
