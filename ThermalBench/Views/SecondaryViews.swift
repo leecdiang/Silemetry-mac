@@ -9,6 +9,9 @@ struct ResultsView: View {
     let run: RunRecord
     @Environment(AppModel.self) private var app
     @State private var selectedSection: ResultSection = .summary
+    /// Samples loaded once in the background; avoids re-reading the whole
+    /// JSONL file on every computed-property access (main thread).
+    @State private var cachedSamples: [TelemetrySample]?
 
     enum ResultSection: String, CaseIterable, Identifiable {
         case summary = "Summary"
@@ -22,7 +25,7 @@ struct ResultsView: View {
     }
 
     private var storedSamples: [TelemetrySample] {
-        SampleArchive.load(from: run)
+        cachedSamples ?? []
     }
 
     var body: some View {
@@ -84,16 +87,24 @@ struct ResultsView: View {
                 .keyboardShortcut(.escape)
             }
         }
+        .onAppear {
+            guard cachedSamples == nil else { return }
+            let r = run
+            Task.detached(priority: .userInitiated) {
+                let loaded = SampleArchive.load(from: r)
+                await MainActor.run { cachedSamples = loaded }
+            }
+        }
     }
 
     // MARK: - Summary
 
     var summarySection: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            summaryTile("CPU Hottest", value: run.cpuPeakTemp > 0 ? String(format: "%.1f °C", run.cpuPeakTemp) : "N/A", color: .red)
-            summaryTile("GPU Hottest", value: run.gpuPeakTemp > 0 ? String(format: "%.1f °C", run.gpuPeakTemp) : "N/A", color: .purple)
-            summaryTile("CPU Peak Power", value: run.cpuPeakPower > 0 ? String(format: "%.1f W", run.cpuPeakPower) : "N/A", color: .blue)
-            summaryTile("P-Cluster Peak", value: run.pClusterMinFreq > 0 ? String(format: "%.2f GHz", run.pClusterMinFreq / 1000) : "N/A", color: .green)
+            summaryTile("CPU Hottest", value: run.cpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .red)
+            summaryTile("GPU Hottest", value: run.gpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .purple)
+            summaryTile("CPU Peak Power", value: run.cpuPeakPower.map { String(format: "%.1f W", $0) } ?? "N/A", color: .blue)
+            summaryTile("P-Cluster Peak", value: (run.pClusterPeakFreq ?? (run.pClusterMinFreq > 0 ? run.pClusterMinFreq : nil)).map { String(format: "%.2f GHz", $0 / 1000) } ?? "N/A", color: .green)
             summaryTile("Samples", value: "\(run.sampleCount)", color: .secondary)
             summaryTile("Duration", value: durationStr(run.duration), color: .secondary)
             summaryTile("Coverage", value: String(format: "%.0f%%", run.dataCoverage * 100), color: run.dataCoverage > 0.8 ? .green : .orange)
@@ -111,8 +122,8 @@ struct ResultsView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Metrics
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                summaryTile("CPU Hottest Peak", value: run.cpuPeakTemp > 0 ? String(format: "%.1f °C", run.cpuPeakTemp) : "N/A", color: .red)
-                summaryTile("GPU Hottest Peak", value: run.gpuPeakTemp > 0 ? String(format: "%.1f °C", run.gpuPeakTemp) : "N/A", color: .purple)
+                summaryTile("CPU Hottest Peak", value: run.cpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .red)
+                summaryTile("GPU Hottest Peak", value: run.gpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .purple)
                 summaryTile("Sensor Count", value: storedSamples.last.map { "\($0.cpuTempSensorCount) CPU" } ?? "N/A", color: .secondary)
             }
             .padding(.horizontal)
@@ -151,7 +162,7 @@ struct ResultsView: View {
     var powerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                summaryTile("CPU Peak", value: run.cpuPeakPower > 0 ? String(format: "%.1f W", run.cpuPeakPower) : "N/A", color: .blue)
+                summaryTile("CPU Peak", value: run.cpuPeakPower.map { String(format: "%.1f W", $0) } ?? "N/A", color: .blue)
             }.padding(.horizontal)
 
             if !storedSamples.isEmpty {
@@ -342,6 +353,9 @@ struct HistoryView: View {
     @State private var deleteConfirmRun: RunRecord?
     @State private var renameRun: RunRecord?
     @State private var renameText: String = ""
+    @State private var isSelecting = false
+    @State private var selectedRuns = Set<RunRecord.ID>()
+    @State private var confirmDeleteSelected = false
 
     var body: some View {
         Group {
@@ -351,6 +365,11 @@ struct HistoryView: View {
             } else {
                 List(runs) { run in
                     HStack {
+                        if isSelecting {
+                            Image(systemName: selectedRuns.contains(run.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedRuns.contains(run.id) ? Color.accentColor : .secondary)
+                                .font(.title3)
+                        }
                         Button {
                             app.route = .result(run.uuid)
                         } label: {
@@ -376,7 +395,7 @@ struct HistoryView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .disabled(run.sampleCount == 0 || run.duration <= 0)
+                        .disabled(run.sampleCount == 0 || run.duration <= 0 || isSelecting)
                         .contextMenu {
                             Button("Open") { app.route = .result(run.uuid) }
                             Button("Rename") { renameRun = run; renameText = run.name }
@@ -391,9 +410,27 @@ struct HistoryView: View {
                         }
                         .buttonStyle(.borderless)
                         .help("Delete this test")
+                        .opacity(isSelecting ? 0 : 1)
+                        .disabled(isSelecting)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if isSelecting {
+                            if selectedRuns.contains(run.id) {
+                                selectedRuns.remove(run.id)
+                            } else {
+                                selectedRuns.insert(run.id)
+                            }
+                        }
                     }
                 }
             }
+        }
+        .alert("Delete \(selectedRuns.count) test(s)?", isPresented: $confirmDeleteSelected) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { deleteSelectedRuns() }
+        } message: {
+            Text("This will permanently delete \(selectedRuns.count) tests and their sample files. This cannot be undone.")
         }
         .alert("Delete this test?", isPresented: .init(
             get: { deleteConfirmRun != nil },
@@ -426,6 +463,33 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if !isSelecting {
+                    Button("Select") {
+                        withAnimation { isSelecting = true }
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        Button(selectedRuns.count == runs.count ? "Deselect All" : "Select All") {
+                            if selectedRuns.count == runs.count {
+                                selectedRuns.removeAll()
+                            } else {
+                                selectedRuns = Set(runs.map(\.id))
+                            }
+                        }
+                        Button("Delete (\(selectedRuns.count))") {
+                            if !selectedRuns.isEmpty { confirmDeleteSelected = true }
+                        }
+                        .disabled(selectedRuns.isEmpty)
+                        Button("Cancel") {
+                            withAnimation { isSelecting = false }
+                            selectedRuns.removeAll()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func renameAndSave() {
@@ -440,9 +504,21 @@ struct HistoryView: View {
         renameRun = nil
     }
 
+    private func deleteSelectedRuns() {
+        let targets = runs.filter { selectedRuns.contains($0.id) }
+        for run in targets {
+            // Remove sample files first (dataDirectory still holds the path),
+            // then delete the record. Never clear dataDirectory before cleanup.
+            SampleArchive.deleteFiles(for: run)
+            modelContext.delete(run)
+        }
+        try? modelContext.save()
+        withAnimation { isSelecting = false }
+        selectedRuns.removeAll()
+    }
+
     private func deleteRun(_ run: RunRecord) {
-        // Clear Compare selections if they reference this run
-        run.dataDirectory = ""
+        // Remove sample files first, then delete the record.
         SampleArchive.deleteFiles(for: run)
         modelContext.delete(run)
         try? modelContext.save()
@@ -518,7 +594,7 @@ struct CompareView: View {
             Picker(label, selection: selection) {
                 Text("Select...").tag(nil as String?)
                 ForEach(validRuns) { r in
-                    let pct = r.cpuPeakTemp > 0 ? String(format: ", %.0f°C", r.cpuPeakTemp) : ""
+                    let pct = r.cpuPeakTemp.map { String(format: ", %.0f°C", $0) } ?? ""
                     Text("\(r.name.prefix(16)) \(r.createdAt.formatted(date: .abbreviated, time: .shortened)) \(r.sampleCount)s\(pct)")
                         .tag(r.uuid as String?)
                 }
@@ -616,8 +692,8 @@ struct CompareView: View {
                             compareMetric("GPU Peak Temp", a: a.gpuPeakTemp, b: b.gpuPeakTemp, unit: "°C")
                             compareMetric("CPU Peak Power", a: a.cpuPeakPower, b: b.cpuPeakPower, unit: "W")
                             compareRow("P-Cluster Peak",
-                                       a: pFreqStr(a.pClusterMinFreq),
-                                       b: pFreqStr(b.pClusterMinFreq))
+                                       a: pFreqStr(a.pClusterPeakFreq ?? (a.pClusterMinFreq > 0 ? a.pClusterMinFreq : nil)),
+                                       b: pFreqStr(b.pClusterPeakFreq ?? (b.pClusterMinFreq > 0 ? b.pClusterMinFreq : nil)))
                             compareRow("Coverage",
                                        a: pctStr(a.dataCoverage),
                                        b: pctStr(b.dataCoverage))
@@ -628,29 +704,128 @@ struct CompareView: View {
 
                 // Overlay Charts — only when comparable
                 if result.canCompare, !sa.isEmpty || !sb.isEmpty {
-                    GroupBox("Temperature Comparison") {
-                        Chart {
-                            ForEach(sa, id: \.id) { s in
-                                if let t = s.cpuTempHottest {
-                                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A", t), series: .value("Series", "A Hottest"))
-                                        .foregroundStyle(.red.opacity(0.7))
-                                }
-                            }
-                            ForEach(sb, id: \.id) { s in
-                                if let t = s.cpuTempHottest {
-                                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B", t), series: .value("Series", "B Hottest"))
-                                        .foregroundStyle(.red.opacity(0.3)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
-                                }
-                            }
-                        }
-                        .chartXAxisLabel("Time (s)").chartYAxisLabel("°C")
-                        .chartForegroundStyleScale(["A Hottest": .red, "B Hottest": .orange])
-                        .frame(minHeight: 180)
+                    GroupBox("Temperature (°C)") {
+                        compareTempChart(a: sa, b: sb)
+                    }
+                    GroupBox("Power (W)") {
+                        comparePowerChart(a: sa, b: sb)
+                    }
+                    GroupBox("Frequency (GHz)") {
+                        compareFreqChart(a: sa, b: sb)
+                    }
+                    GroupBox("CPU Utilization") {
+                        compareUtilChart(a: sa, b: sb)
                     }
                 }
             }
             .padding(16)
         }
+    }
+
+    // MARK: - Compare Overlay Charts (A solid, B dashed)
+
+    func compareTempChart(a: [TelemetrySample], b: [TelemetrySample]) -> some View {
+        Chart {
+            ForEach(a, id: \.id) { s in
+                if let t = s.cpuTempHottest {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A Hottest", t), series: .value("Series", "A Hottest"))
+                        .foregroundStyle(.red.opacity(0.8))
+                }
+                if let t = s.gpuTempHottest {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A GPU", t), series: .value("Series", "A GPU"))
+                        .foregroundStyle(.purple.opacity(0.8))
+                }
+            }
+            ForEach(b, id: \.id) { s in
+                if let t = s.cpuTempHottest {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B Hottest", t), series: .value("Series", "B Hottest"))
+                        .foregroundStyle(.orange.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+                if let t = s.gpuTempHottest {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B GPU", t), series: .value("Series", "B GPU"))
+                        .foregroundStyle(.pink.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+            }
+        }
+        .chartXAxisLabel("Time (s)").chartYAxisLabel("°C")
+        .chartForegroundStyleScale(["A Hottest": .red, "A GPU": .purple, "B Hottest": .orange, "B GPU": .pink])
+        .frame(minHeight: 180)
+    }
+
+    func comparePowerChart(a: [TelemetrySample], b: [TelemetrySample]) -> some View {
+        Chart {
+            ForEach(a, id: \.id) { s in
+                if let p = s.cpuPower {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A CPU", p), series: .value("Series", "A CPU"))
+                        .foregroundStyle(.blue.opacity(0.8))
+                }
+                if let p = s.gpuPower {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A GPU", p), series: .value("Series", "A GPU"))
+                        .foregroundStyle(.purple.opacity(0.8))
+                }
+            }
+            ForEach(b, id: \.id) { s in
+                if let p = s.cpuPower {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B CPU", p), series: .value("Series", "B CPU"))
+                        .foregroundStyle(.orange.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+                if let p = s.gpuPower {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B GPU", p), series: .value("Series", "B GPU"))
+                        .foregroundStyle(.pink.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+            }
+        }
+        .chartXAxisLabel("Time (s)").chartYAxisLabel("W")
+        .chartForegroundStyleScale(["A CPU": .blue, "A GPU": .purple, "B CPU": .orange, "B GPU": .pink])
+        .frame(minHeight: 180)
+    }
+
+    func compareFreqChart(a: [TelemetrySample], b: [TelemetrySample]) -> some View {
+        Chart {
+            ForEach(a, id: \.id) { s in
+                if let f = s.pClusterFreqMHz {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A P", f / 1000), series: .value("Series", "A P"))
+                        .foregroundStyle(.green.opacity(0.8))
+                }
+                if let f = s.eClusterFreqMHz {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A E", f / 1000), series: .value("Series", "A E"))
+                        .foregroundStyle(.teal.opacity(0.8))
+                }
+            }
+            ForEach(b, id: \.id) { s in
+                if let f = s.pClusterFreqMHz {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B P", f / 1000), series: .value("Series", "B P"))
+                        .foregroundStyle(.orange.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+                if let f = s.eClusterFreqMHz {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B E", f / 1000), series: .value("Series", "B E"))
+                        .foregroundStyle(.pink.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+            }
+        }
+        .chartXAxisLabel("Time (s)").chartYAxisLabel("GHz")
+        .chartForegroundStyleScale(["A P": .green, "A E": .teal, "B P": .orange, "B E": .pink])
+        .frame(minHeight: 180)
+    }
+
+    func compareUtilChart(a: [TelemetrySample], b: [TelemetrySample]) -> some View {
+        Chart {
+            ForEach(a, id: \.id) { s in
+                if let u = s.cpuUtilization {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("A CPU", u), series: .value("Series", "A CPU"))
+                        .foregroundStyle(.blue.opacity(0.8))
+                }
+            }
+            ForEach(b, id: \.id) { s in
+                if let u = s.cpuUtilization {
+                    LineMark(x: .value("s", s.elapsedSeconds), y: .value("B CPU", u), series: .value("Series", "B CPU"))
+                        .foregroundStyle(.orange.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                }
+            }
+        }
+        .chartXAxisLabel("Time (s)").chartYAxisLabel("Ratio")
+        .chartForegroundStyleScale(["A CPU": .blue, "B CPU": .orange])
+        .frame(minHeight: 160)
     }
 
     func compareRow(_ label: String, a: String, b: String) -> some View {
@@ -691,10 +866,10 @@ struct CompareView: View {
 
     // MARK: - Legacy helpers (kept for compatibility)
 
-    func compareMetric(_ label: String, a: Double, b: Double, unit: String) -> some View {
-        let aAvail = a > 0
-        let bAvail = b > 0
-        let delta = aAvail && bAvail ? b - a : nil
+    func compareMetric(_ label: String, a: Double?, b: Double?, unit: String) -> some View {
+        let aAvail = a != nil
+        let bAvail = b != nil
+        let delta = aAvail && bAvail ? b! - a! : nil
         let deltaStr: String
         if let d = delta {
             let sign = d >= 0 ? "+" : ""
@@ -704,15 +879,15 @@ struct CompareView: View {
         }
         return GridRow {
             Text(label).foregroundStyle(.secondary)
-            Text(aAvail ? String(format: "%.1f \(unit)", a) : "N/A")
-            Text(bAvail ? String(format: "%.1f \(unit)", b) : "N/A")
+            Text(aAvail ? String(format: "%.1f \(unit)", a!) : "N/A")
+            Text(bAvail ? String(format: "%.1f \(unit)", b!) : "N/A")
             Text(deltaStr).foregroundStyle(.secondary)
         }
         .font(.caption)
     }
 
-    func pFreqStr(_ f: Double) -> String {
-        f > 0 ? String(format: "%.2f GHz", f / 1000) : "N/A"
+    func pFreqStr(_ f: Double?) -> String {
+        f.map { String(format: "%.2f GHz", $0 / 1000) } ?? "N/A"
     }
     func pctStr(_ v: Double) -> String {
         v > 0 ? String(format: "%.0f%%", v * 100) : "N/A"
@@ -731,18 +906,6 @@ struct CompareView: View {
 // MARK: - Diagnostics View
 
 // MARK: - Diagnostics
-
-private struct ProbeResult {
-    var tempOK: Bool?
-    var powerOK: Bool?
-    var freqOK: Bool?
-    var tempHottest: Double?
-    var cpuPower: Double?
-    var pFreq: Double?
-    var battery: Int?
-    var ac: Bool?
-    var error: String?
-}
 
 private struct DiagnosticRow: View {
     let icon: String
@@ -807,51 +970,66 @@ private struct DiagSection<Content: View>: View {
 }
 
 struct DiagnosticsView: View {
-    @State private var probe: ProbeResult? = nil
-    @State private var isProbing = false
+    /// Battery info read once on appear (IOPowerSources via telemetry core).
+    @State private var batteryInfo: (ac: Bool, percent: Int)? = nil
 
     var body: some View {
         let dev = DeviceProfile.current
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 deviceHeader(dev)
-                selfCheckCard()
 
-                DiagSection(title: "App", icon: "app.badge", tint: .blue) {
-                    DiagnosticRow(icon: "number", iconColor: .blue, label: "Version", value: BuildIdentity.appVersion)
-                    DiagnosticRow(icon: "chevron.left.forwardslash.chevron.right", iconColor: .blue, label: "Git Commit", value: BuildIdentity.gitSHA)
-                    DiagnosticRow(icon: "clock", iconColor: .blue, label: "Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
-                    DiagnosticRow(icon: "macbook", iconColor: .blue, label: "Model Identifier", value: dev.modelIdentifier)
+                DiagSection(title: "Hardware", icon: "cpu", tint: .blue) {
                     DiagnosticRow(icon: "cpu", iconColor: .blue, label: "Chip", value: dev.chipName)
-                    DiagnosticRow(icon: "circle.grid.2x2", iconColor: .blue, label: "Cores", value: dev.coreSummary)
-                    DiagnosticRow(icon: "memorychip", iconColor: .blue, label: "Memory", value: dev.formattedMemory)
-                    DiagnosticRow(icon: "apple.logo", iconColor: .blue, label: "macOS", value: dev.macOSVersion)
-                    DiagnosticRow(icon: "square.3.layers.3d", iconColor: .blue, label: "Metal Device",
-                                 value: dev.metalDeviceName ?? "N/A",
-                                 status: dev.metalDeviceName == nil ? .yellow : .green)
+                    DiagnosticRow(icon: "macbook", iconColor: .blue, label: "Model Identifier", value: dev.modelIdentifier)
+                    DiagnosticRow(icon: "circle.grid.2x2", iconColor: .blue, label: "CPU Cores", value: dev.coreSummary)
                     if let gpu = dev.gpuCoreCount {
                         DiagnosticRow(icon: "gpu", iconColor: .blue, label: "GPU Cores", value: "\(gpu)")
                     }
-                    DiagnosticRow(icon: "leaf", iconColor: .blue, label: "Low Power Mode",
+                    DiagnosticRow(icon: "square.3.layers.3d", iconColor: .blue, label: "Metal Device",
+                                 value: dev.metalDeviceName ?? "N/A",
+                                 status: dev.metalDeviceName == nil ? .yellow : .green)
+                    DiagnosticRow(icon: "memorychip", iconColor: .blue, label: "Memory", value: dev.formattedMemory)
+                    DiagnosticRow(icon: "internaldrive", iconColor: .blue, label: "Storage", value: storageSummary)
+                    DiagnosticRow(icon: "cpu.and.ram", iconColor: .blue, label: "Architecture", value: architecture)
+                }
+
+                DiagSection(title: "Battery & Power", icon: "battery.75percent", tint: .green) {
+                    DiagnosticRow(icon: "bolt.fill", iconColor: .green, label: "Power Source",
+                                 value: powerSourceLabel, status: powerSourceOK ? .green : .yellow)
+                    DiagnosticRow(icon: "battery.75percent", iconColor: .green, label: "Battery",
+                                 value: batteryLevelLabel)
+                    DiagnosticRow(icon: "leaf", iconColor: .green, label: "Low Power Mode",
                                  value: ProcessInfo.processInfo.isLowPowerModeEnabled ? "ON" : "OFF",
                                  status: ProcessInfo.processInfo.isLowPowerModeEnabled ? .yellow : .green)
                 }
 
-                DiagSection(title: "Telemetry", icon: "waveform.path.ecg", tint: .orange) {
+                DiagSection(title: "Software", icon: "app.badge", tint: .purple) {
+                    DiagnosticRow(icon: "apple.logo", iconColor: .purple, label: "macOS", value: dev.macOSVersion)
+                    DiagnosticRow(icon: "number", iconColor: .purple, label: "App Version", value: BuildIdentity.appVersion)
+                    DiagnosticRow(icon: "chevron.left.forwardslash.chevron.right", iconColor: .purple, label: "Git Commit", value: BuildIdentity.gitSHA)
+                    DiagnosticRow(icon: "clock", iconColor: .purple, label: "Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
+                }
+
+                DiagSection(title: "Telemetry Architecture", icon: "waveform.path.ecg", tint: .orange) {
                     DiagnosticRow(icon: "shippingbox", iconColor: .orange, label: "Core", value: "Embedded Rust macmon (vendored)")
+                    DiagnosticRow(icon: "number.circle", iconColor: .orange, label: "Core Version", value: telemetryCoreVersion)
                     DiagnosticRow(icon: "thermometer.medium", iconColor: .orange, label: "Temperature", value: "Apple SMC sensor aggregation")
                     DiagnosticRow(icon: "bolt.fill", iconColor: .orange, label: "Power", value: "IOReport via embedded library")
                     DiagnosticRow(icon: "waveform", iconColor: .orange, label: "Frequency", value: "IOReport via embedded library")
                     DiagnosticRow(icon: "square.grid.3x3", iconColor: .orange, label: "Per-Core", value: "\(dev.coreSummary) via host_processor_info")
                     DiagnosticRow(icon: "lock.shield", iconColor: .orange, label: "Privileges", value: "No sudo")
-                    DiagnosticRow(icon: "externaldrive", iconColor: .orange, label: "External Processes", value: "None")
-                }
-
-                DiagSection(title: "Battery", icon: "battery.75percent", tint: .green) {
-                    DiagnosticRow(icon: "battery.75percent", iconColor: .green, label: "Source", value: "IOPowerSources (public API)")
                 }
             }
             .padding(24)
+        }
+        .onAppear {
+            let batt = tb_read_battery()
+            if batt.battery_valid {
+                batteryInfo = (batt.ac_connected, Int(batt.battery_percent))
+            } else {
+                batteryInfo = nil
+            }
         }
         .navigationTitle("Diagnostics")
     }
@@ -885,112 +1063,42 @@ struct DiagnosticsView: View {
         .background(diagCardBackground(cornerRadius: 18))
     }
 
-    // MARK: - Live one-shot probe
+    // MARK: - Report helpers
 
-    private func selfCheckCard() -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "stethoscope")
-                    Text("Quick Self-Check").textCase(.uppercase)
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.purple)
-                Spacer()
-                if isProbing {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button {
-                        runProbe()
-                    } label: {
-                        Label("Run", systemImage: "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(.purple)
-                }
-            }
-            Divider()
-
-            if let probe {
-                if let err = probe.error {
-                    Label(err, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.red)
-                } else {
-                    VStack(spacing: 10) {
-                        probeRow(icon: "thermometer.medium", color: .orange, label: "Temperature",
-                                 ok: probe.tempOK,
-                                 value: probe.tempHottest.map { String(format: "%.1f°C", $0) } ?? "—")
-                        probeRow(icon: "bolt.fill", color: .yellow, label: "Power",
-                                 ok: probe.powerOK,
-                                 value: probe.cpuPower.map { String(format: "%.1f W", $0) } ?? "—")
-                        probeRow(icon: "waveform", color: .teal, label: "Frequency",
-                                 ok: probe.freqOK,
-                                 value: probe.pFreq.map { String(format: "%.0f MHz", $0) } ?? "—")
-                        probeRow(icon: "battery.75percent", color: .green, label: "Power Source",
-                                 ok: probe.ac != nil,
-                                 value: (probe.ac == true ? "AC" : probe.ac == false ? "Battery" : "Unknown")
-                                     + (probe.battery.map { " · \($0)%" } ?? ""))
-                    }
-                }
-            } else if !isProbing {
-                Text("Run a live one-shot probe to verify temperature, power, frequency and power-source channels.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+    private var storageSummary: String {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]),
+              let free = values.volumeAvailableCapacityForImportantUsage,
+              let total = values.volumeTotalCapacity else {
+            return "N/A"
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(diagCardBackground(cornerRadius: 14))
+        return String(format: "%.0f GB free / %.0f GB", Double(free) / 1_073_741_824, Double(total) / 1_073_741_824)
     }
 
-    private func probeRow(icon: String, color: Color, label: String, ok: Bool?, value: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(color)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(color.opacity(0.14)))
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Circle()
-                .fill(ok == true ? .green : (ok == false ? .red : .gray))
-                .frame(width: 8, height: 8)
-            Text(value)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.primary)
-        }
+    private var architecture: String {
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        var buf = [CChar](repeating: 0, count: size)
+        sysctlbyname("hw.machine", &buf, &size, nil, 0)
+        return String(cString: buf)
     }
 
-    private func runProbe() {
-        isProbing = true
-        probe = nil
-        let ts = TelemetryService.shared
-        Task {
-            do {
-                try await ts.startTelemetry(intervalMilliseconds: 250)
-                let s = try await ts.readSample()
-                await ts.stopTelemetry()
-                probe = ProbeResult(
-                    tempOK: s.tempValid,
-                    powerOK: s.powerValid,
-                    freqOK: s.freqValid,
-                    tempHottest: s.cpuTempHottest,
-                    cpuPower: s.cpuPower,
-                    pFreq: s.pClusterFreqMHz,
-                    battery: s.batteryPercent,
-                    ac: s.acConnected
-                )
-                isProbing = false
-            } catch {
-                await ts.stopTelemetry()
-                probe = ProbeResult(error: error.localizedDescription)
-                isProbing = false
-            }
-        }
+    private var powerSourceLabel: String {
+        guard let b = batteryInfo else { return "Unknown" }
+        return b.ac ? "AC Power" : "Battery"
+    }
+
+    private var powerSourceOK: Bool {
+        batteryInfo != nil
+    }
+
+    private var batteryLevelLabel: String {
+        guard let b = batteryInfo else { return "Unknown" }
+        return "\(b.percent)%"
+    }
+
+    private var telemetryCoreVersion: String {
+        String(cString: tb_telemetry_core_version())
     }
 }
 

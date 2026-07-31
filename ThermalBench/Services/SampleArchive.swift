@@ -33,21 +33,22 @@ enum SampleArchive {
     private static let decoder = JSONDecoder()
 
     /// Append a batch of samples to the run's JSONL file (creates dir/file).
-    static func append(_ samples: [TelemetrySample], uuid: String) {
+    /// Throws on failure so callers never silently lose data.
+    static func append(_ samples: [TelemetrySample], uuid: String) throws {
         guard !samples.isEmpty else { return }
         let dir = directory(for: uuid)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = samplesFile(for: uuid)
-        let lines = samples.compactMap { try? encoder.encode($0) }
+        let lines = try samples.map { try encoder.encode($0) }
             .map { String(data: $0, encoding: .utf8) ?? "" }
         guard !lines.isEmpty else { return }
         let data = (lines.joined(separator: "\n") + "\n").data(using: .utf8)!
         if let fh = try? FileHandle(forWritingTo: file) {
             defer { try? fh.close() }
             fh.seekToEndOfFile()
-            fh.write(data)
+            try fh.write(contentsOf: data)
         } else {
-            try? data.write(to: file)
+            try data.write(to: file)
         }
     }
 

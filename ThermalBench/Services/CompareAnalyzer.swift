@@ -169,10 +169,23 @@ enum CompareAnalyzer {
                                              a: a.lowPowerMode, b: b.lowPowerMode,
                                              warnings: &warnings))
 
-        fields.append(checkNumericField(id: "ambient", label: "Ambient Temp",
-                                        a: a.ambientTemperature, b: b.ambientTemperature,
-                                        tolerance: 0, severity: .info,
-                                        warnings: &warnings))
+        // Ambient temperature — nil = not recorded (never a fake 25°C)
+        if let ta = a.ambientTemperature, let tb = b.ambientTemperature {
+            fields.append(checkNumericField(id: "ambient", label: "Ambient Temp",
+                                            a: ta, b: tb, tolerance: 0, severity: .info,
+                                            warnings: &warnings))
+        } else if a.ambientTemperature == nil && b.ambientTemperature == nil {
+            fields.append(ComparabilityField(id: "ambient", label: "Ambient Temp",
+                                             valueA: "Not recorded", valueB: "Not recorded", match: true))
+        } else {
+            let fa = a.ambientTemperature.map { String(format: "%.0f°C", $0) } ?? "Not recorded"
+            let fb = b.ambientTemperature.map { String(format: "%.0f°C", $0) } ?? "Not recorded"
+            warnings.append(ComparabilityWarning(
+                id: "ambient_unknown", field: "Ambient Temp", severity: .info,
+                detail: "Ambient recorded for one run only (A: \(fa), B: \(fb))"
+            ))
+            fields.append(ComparabilityField(id: "ambient", label: "Ambient Temp", valueA: fa, valueB: fb, match: false))
+        }
 
         fields.append(checkNumericField(id: "analysisVer", label: "Analysis Version",
                                         a: Double(a.analysisVersion), b: Double(b.analysisVersion),
@@ -196,8 +209,8 @@ enum CompareAnalyzer {
 
         // workloadType — not stored directly; infer from testModeRaw + metrics
         // For now, flag if modes differ
-        let aCpuUsed = !a.cpuPeakPower.isZero
-        let bCpuUsed = !b.cpuPeakPower.isZero
+        let aCpuUsed = (a.cpuPeakPower ?? 0) > 0
+        let bCpuUsed = (b.cpuPeakPower ?? 0) > 0
         if aCpuUsed != bCpuUsed {
             warnings.append(ComparabilityWarning(
                 id: "cpu_load", field: "CPU Load", severity: .warning,

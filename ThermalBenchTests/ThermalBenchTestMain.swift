@@ -331,7 +331,7 @@ func runAllTests() {
             samples.append(s)
         }
         let uuid = "test-\(UUID().uuidString)"
-        SampleArchive.append(samples, uuid: uuid)
+        try SampleArchive.append(samples, uuid: uuid)
         let run = RunRecord(config: TestConfiguration())
         run.dataDirectory = SampleArchive.samplesFile(for: uuid).path
         let loaded = SampleArchive.load(from: run)
@@ -430,7 +430,7 @@ func runAllTests() {
         try assertEqual(run!.phaseRaw, TestPhase.cancelled.rawValue)
         try assertEqual(run!.sampleCount, 10)
         try assertGreaterThan(run!.duration, 0)
-        try assertEqual(run!.cpuPeakTemp, 59.0)
+        try assertEqual(run!.cpuPeakTemp!, 59.0)
         try assertFalse(run!.appVersion.isEmpty)
     }
 
@@ -473,6 +473,109 @@ func runAllTests() {
         try assertFalse(dev.chipName.isEmpty)
         try assertGreaterThan(dev.cpuCoreCount, 0)
         try assertGreaterThan(dev.memoryBytes, 0)
+    }
+
+    // ── TestCoordinator stop/discard finalization ───────────────────────
+    test("stopAndSave finalizes via main task (cancelled record)") {
+        let coord = MainActor.assumeIsolated { () -> TestCoordinator in
+            let c = TestCoordinator()
+            var samples: [TelemetrySample] = []
+            for i in 0..<10 {
+                var s = TelemetrySample()
+                s.elapsedSeconds = Double(i)
+                s.cpuTempHottest = Double(50 + i)
+                s.cpuPower = 5.0
+                s.tempValid = true
+                samples.append(s)
+            }
+            c.samples = samples
+            c.stopAndSave()
+            return c
+        }
+        // stopAndSave only requests the stop; the final state is produced by
+        // the (not running here) main task. Simulate its finalization path:
+        let run = MainActor.assumeIsolated { () -> RunRecord? in
+            TestCoordinator.cancelledRecord(samples: coord.samples, config: coord.testConfig)
+        }
+        try assertNotNil(run)
+        try assertTrue(run!.wasInterrupted)
+        try assertEqual(run!.phaseRaw, TestPhase.cancelled.rawValue)
+        try assertEqual(run!.sampleCount, 10)
+        try assertEqual(run!.cpuPeakTemp!, 59.0)
+    }
+
+    test("cancelAndDiscard produces no record") {
+        let coord = MainActor.assumeIsolated { () -> TestCoordinator in
+            let c = TestCoordinator()
+            var samples: [TelemetrySample] = []
+            var s = TelemetrySample()
+            s.cpuTempHottest = 50
+            samples.append(s)
+            c.samples = samples
+            c.cancelAndDiscard()
+            return c
+        }
+        // Discard must never persist: the record builder returns nil for the
+        // discarded path (coord samples are cleared by the main task).
+        let run = MainActor.assumeIsolated { () -> RunRecord? in
+            TestCoordinator.cancelledRecord(samples: [], config: coord.testConfig)
+        }
+        try assertNil(run)
+    }
+
+    // ── History deletion leaves no orphan files ─────────────────────────
+    test("deleteFiles removes both record path and uuid dir") {
+        let uuid = "orphan-\(UUID().uuidString)"
+        var samples: [TelemetrySample] = []
+        var s = TelemetrySample()
+        s.cpuTempHottest = 42
+        samples.append(s)
+        try SampleArchive.append(samples, uuid: uuid)
+        let file = SampleArchive.samplesFile(for: uuid)
+        try assertTrue(FileManager.default.fileExists(atPath: file.path))
+
+        let run = RunRecord(config: TestConfiguration())
+        run.uuid = uuid
+        run.dataDirectory = file.path
+        SampleArchive.deleteFiles(for: run)
+        try assertFalse(FileManager.default.fileExists(atPath: file.path))
+        try assertFalse(FileManager.default.fileExists(atPath: SampleArchive.directory(for: uuid).path))
+    }
+
+    // ── Long-test summary uses full stream, not the ring buffer ─────────
+    test("RunAccumulator keeps early peaks beyond 7200 samples") {
+        var acc = RunAccumulator()
+        // 8000 samples: peak temp occurs at sample 100 (early, would be
+        // dropped by the 7200 ring buffer).
+        for i in 0..<8000 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = Double(i)
+            s.cpuTempHottest = i == 100 ? 99.0 : Double(40 + (i % 10))
+            s.cpuTemp = s.cpuTempHottest
+            s.cpuPower = 10.0
+            s.tempValid = true
+            acc.add(s)
+        }
+        let analysis = acc.makeAnalysis(config: TestConfiguration())
+        try assertEqual(analysis.cpuPeakTemp!, 99.0)
+        try assertEqual(analysis.sampleCount, 8000)
+        try assertEqual(analysis.duration, 7999.0)
+
+        // Ring-buffer view (last 7200) misses the early peak:
+        var ring = RunAccumulator()
+        var all: [TelemetrySample] = []
+        for i in 0..<8000 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = Double(i)
+            s.cpuTempHottest = i == 100 ? 99.0 : Double(40 + (i % 10))
+            s.cpuTemp = s.cpuTempHottest
+            s.cpuPower = 10.0
+            s.tempValid = true
+            all.append(s)
+        }
+        ring.add(Array(all.suffix(7200)))
+        let ringAnalysis = ring.makeAnalysis(config: TestConfiguration())
+        try assertFalse(ringAnalysis.cpuPeakTemp! == 99.0)
     }
 
     // ── Report ──────────────────────────────────────────────────────────

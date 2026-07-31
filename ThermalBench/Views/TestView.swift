@@ -7,14 +7,7 @@ struct TestView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.modelContext) private var modelContext
     @State private var showStopConfirm = false
-    @State private var selectedTab: TestTab = .overview
     @State private var showCancelConfirm = false
-
-    enum TestTab: String, CaseIterable, Identifiable {
-        case overview = "Overview"
-        case cores = "Cores"
-        var id: Self { self }
-    }
 
     enum CoreKind { case efficiency, performance }
 
@@ -45,21 +38,8 @@ struct TestView: View {
             // Status bar
             statusBar
             Divider()
-            // Tab switcher
-            Picker("View", selection: $selectedTab) {
-                ForEach(TestTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-            // Content
-            if selectedTab == .overview {
-                overviewContent
-            } else {
-                coreActivityContent
-            }
+            // Content (single page: charts + per-core utilization)
+            overviewContent
             // Bottom bar
             bottomBar
         }
@@ -291,11 +271,11 @@ struct TestView: View {
                 chartCard("Temperature (°C)", empty: !hasValidTemp) { tempChart }
                 chartCard("Power (W)", empty: !hasValidPower) { powerChart }
                 chartCard("Frequency (GHz)", empty: !hasValidFreq) { freqChart }
-                // Thermal as compact card instead of full chart
+                // Per-core utilization card (replaces the thermal state card)
                 GroupBox {
-                    thermalCompactCard
+                    coreUtilizationCard
                 } label: {
-                    Label("Thermal State", systemImage: "thermometer")
+                    Label("Per-Core Utilization", systemImage: "cpu")
                 }
                 .frame(minHeight: 100)
             }
@@ -303,79 +283,38 @@ struct TestView: View {
         }
     }
 
-    var thermalCompactCard: some View {
-        HStack(spacing: 12) {
-            // State badge
-            if let state = coord.latest?.thermalState {
-                Circle().fill(thermalColorForTag(state)).frame(width: 12, height: 12)
-                Text(stateLabel(state)).font(.subheadline).bold()
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            Text("Current").font(.caption).foregroundStyle(.secondary)
-
-            Divider().frame(height: 24)
-
-            // Worst so far
-            let worst = samples.compactMap(\.thermalState).min { thermalY($0) < thermalY($1) }
-            if let w = worst {
-                Circle().fill(thermalColorForTag(w)).frame(width: 8, height: 8)
-                Text("Worst: \(stateLabel(w))").font(.caption).foregroundStyle(.secondary)
-            }
-
-            Divider().frame(height: 24)
-
-            // Time non-Nominal
-            if let nonNom = samples.last(where: { $0.thermalState != .nominal }) {
-                Text("Non-Nominal at \(String(format: "%.0fs", nonNom.elapsedSeconds))").font(.caption).foregroundStyle(.orange)
+    var coreUtilizationCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            let cores = latestSampleCores
+            if cores.isEmpty {
+                Text("Waiting for first per-core sample...")
+                    .foregroundStyle(.secondary).padding(.vertical, 4)
             } else {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-                    Text("Nominal throughout").font(.caption).foregroundStyle(.secondary)
+                Text("Efficiency").font(.caption2).foregroundStyle(.secondary)
+                ForEach(cores.filter { $0.kind == .efficiency }) { core in
+                    coreBar(core: core)
                 }
+                Divider().padding(.vertical, 2)
+                Text("Performance").font(.caption2).foregroundStyle(.secondary)
+                ForEach(cores.filter { $0.kind == .performance }) { core in
+                    coreBar(core: core)
+                }
+            }
+            Divider().padding(.vertical, 2)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+                clusterItem("P Freq", latestPCluFreqStr)
+                clusterItem("E Freq", latestECluFreqStr)
+                clusterItem("P Util", latestPUtilStr)
+                clusterItem("E Util", latestEUtilStr)
             }
         }
     }
 
-    // MARK: - Core Activity Content
-
-    var coreActivityContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Core utilization bars
-                let cores = latestSampleCores
-                if cores.isEmpty {
-                    Text("Waiting for first per-core sample...")
-                        .foregroundStyle(.secondary).padding()
-                } else {
-                    GroupBox("Per-Core Utilization") {
-                        LazyVStack(spacing: 6) {
-                            Text("Efficiency Cores").font(.caption).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            ForEach(cores.filter { $0.kind == .efficiency }) { core in
-                                coreBar(core: core)
-                            }
-                            Divider().padding(.vertical, 4)
-                            Text("Performance Cores").font(.caption).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            ForEach(cores.filter { $0.kind == .performance }) { core in
-                                coreBar(core: core)
-                            }
-                        }
-                    }
-                }
-
-                // Cluster summary
-                if !samples.isEmpty {
-                    GroupBox("Cluster Summary") {
-                        LabeledContent("P-Cluster Frequency", value: latestPCluFreqStr)
-                        LabeledContent("E-Cluster Frequency", value: latestECluFreqStr)
-                        LabeledContent("P-Cluster Utilization", value: latestPUtilStr)
-                        LabeledContent("E-Cluster Utilization", value: latestEUtilStr)
-                    }
-                }
-            }
-            .padding(16)
+    func clusterItem(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.caption.monospaced()).bold()
         }
     }
 
@@ -392,14 +331,18 @@ struct TestView: View {
         return String(format: "%.0f MHz", f)
     }
     var latestPUtilStr: String {
-        guard let u = coord.latest?.cpuUtilization else { return "--" }
-        return String(format: "%.1f%%", u * 100)
+        let ps = coord.latest?.perCoreUtilization.filter { $0.kind == .performance && $0.valid }
+        guard let ps, !ps.isEmpty else { return "--" }
+        let vals = ps.compactMap(\.utilizationPercent)
+        guard !vals.isEmpty else { return "--" }
+        return String(format: "%.1f%%", vals.reduce(0, +) / Double(vals.count))
     }
     var latestEUtilStr: String {
-        guard let eSamples = coord.latest?.perCoreUtilization.filter({ $0.kind == .efficiency }),
-              !eSamples.isEmpty else { return "--" }
-        let avg = eSamples.compactMap(\.utilizationPercent).reduce(0, +) / Double(eSamples.count)
-        return String(format: "%.1f%%", avg)
+        let es = coord.latest?.perCoreUtilization.filter { $0.kind == .efficiency && $0.valid }
+        guard let es, !es.isEmpty else { return "--" }
+        let vals = es.compactMap(\.utilizationPercent)
+        guard !vals.isEmpty else { return "--" }
+        return String(format: "%.1f%%", vals.reduce(0, +) / Double(vals.count))
     }
 
     func coreBar(core: PerCoreUtilization) -> some View {
@@ -449,9 +392,15 @@ struct TestView: View {
         }
     }
 
-    var hasValidTemp: Bool { samples.contains(where: { $0.cpuTemp != nil || $0.cpuTempHottest != nil }) }
-    var hasValidPower: Bool { samples.contains(where: { $0.powerValid }) }
-    var hasValidFreq: Bool { samples.contains(where: { $0.freqValid }) }
+    var hasValidTemp: Bool {
+        samples.contains(where: { $0.cpuTemp != nil || $0.cpuTempHottest != nil || $0.gpuTemp != nil || $0.gpuTempHottest != nil })
+    }
+    var hasValidPower: Bool {
+        samples.contains(where: { $0.cpuPowerValid || $0.gpuPowerValid || $0.cpuPower != nil || $0.gpuPower != nil })
+    }
+    var hasValidFreq: Bool {
+        samples.contains(where: { $0.pFrequencyValid || $0.eFrequencyValid || $0.pClusterFreqMHz != nil || $0.eClusterFreqMHz != nil })
+    }
 
     func tempStr(_ v: Double?) -> String { v.map { String(format: "%.1f", $0) } ?? "…" }
     func powerStr(_ v: Double?) -> String { v.map { String(format: "%.1f", $0) } ?? "…" }

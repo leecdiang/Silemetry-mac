@@ -93,12 +93,26 @@ struct CustomTestConfigView: View {
                     HStack {
                         Text("Ambient Temperature")
                         Spacer()
-                        HStack(spacing: 4) {
-                            Slider(value: $config.ambientTemperature, in: 15...40, step: 1)
+                        HStack(spacing: 8) {
+                            Toggle("", isOn: Binding(
+                                get: { config.ambientTemperature != nil },
+                                set: { on in config.ambientTemperature = on ? 25 : nil }
+                            ))
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            if let t = config.ambientTemperature {
+                                Slider(value: Binding(
+                                    get: { t },
+                                    set: { config.ambientTemperature = $0 }
+                                ), in: 15...40, step: 1)
                                 .frame(width: 120)
-                            Text("\(Int(config.ambientTemperature)) °C")
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                                Text("\(Int(t)) °C")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Not recorded")
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                 }

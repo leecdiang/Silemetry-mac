@@ -18,6 +18,13 @@ final class TestCoordinator {
     var state: State = .idle
     var samples: [TelemetrySample] = []
     var latest: TelemetrySample? = nil
+    /// Set when the sample archive failed to write (surfaced in the UI).
+    var archiveError: String?
+
+    enum FinishReason {
+        case saveInterrupted
+        case discarded
+    }
 
     private let telemetry = TelemetryService.shared
     private let gpuWorkload = GPUWorkloadManager()
@@ -28,6 +35,12 @@ final class TestCoordinator {
     private var runUUID = UUID().uuidString
     /// Samples awaiting flush to the archive file (streamed, not held forever).
     private var archiveBuffer: [TelemetrySample] = []
+    /// True once the archive write failed — stop buffering to avoid unbounded growth.
+    private var archiveUnhealthy = false
+    /// Single finalization owner: the main start() task decides the final state.
+    private var finishReason: FinishReason?
+    /// Streaming summary — complete peaks even when samples ring buffer drops old data.
+    private var accumulator = RunAccumulator()
 
     var testConfig = TestConfiguration()
     var testModeRaw: String = ""
@@ -42,9 +55,13 @@ final class TestCoordinator {
         currentPhase = .baseline
         cancelledFlag = false
         untilStoppedFlag = false
+        finishReason = nil
+        archiveError = nil
+        archiveUnhealthy = false
         runUUID = UUID().uuidString
         archiveBuffer.removeAll(keepingCapacity: true)
         samples.removeAll()
+        accumulator = RunAccumulator()
         state = .running(.preflight, elapsed: 0, remaining: totalDuration(config))
 
         do { try await telemetry.startTelemetry(intervalMilliseconds: Int(config.sampleInterval * 1000)) }
@@ -55,7 +72,6 @@ final class TestCoordinator {
         if config.mode == .monitorOnly {
             // Monitor Only: single infinite monitoring phase
             currentPhase = .baseline
-            let phaseStart = DispatchTime.now().uptimeNanoseconds
             while !untilStoppedFlag && !cancelledFlag && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(Int(config.sampleInterval * 1000)))
 
@@ -65,11 +81,7 @@ final class TestCoordinator {
                     samples.append(sample)
                     if samples.count > maxSamples { samples.removeFirst() }
                     latest = sample
-                    archiveBuffer.append(sample)
-                    if archiveBuffer.count >= SampleArchive.batchSize {
-                        SampleArchive.append(archiveBuffer, uuid: runUUID)
-                        archiveBuffer.removeAll(keepingCapacity: true)
-                    }
+                    record(sample)
                 } catch {
                     consecutiveReadFailures += 1
                     lastTelemetryError = error.localizedDescription
@@ -94,15 +106,20 @@ final class TestCoordinator {
             ]
 
             for (phase, duration) in phases {
+                // A stop/discard during any phase must not enter the next one.
+                if cancelledFlag || finishReason != nil || Task.isCancelled { break }
+
                 let phaseStart = DispatchTime.now().uptimeNanoseconds
                 currentPhase = phase
 
-                if phase == .loading { startWorkload(config: config) }
+                if phase == .loading, cancelledFlag == false, finishReason == nil {
+                    startWorkload(config: config)
+                }
                 if phase == .transition { stopWorkload() }
 
                 while true {
                     let elapsed = Double(DispatchTime.now().uptimeNanoseconds - phaseStart) / 1_000_000_000
-                    if elapsed >= duration || cancelledFlag { break }
+                    if elapsed >= duration || cancelledFlag || finishReason != nil { break }
                     if Task.isCancelled { break }
 
                     try? await Task.sleep(for: .milliseconds(Int(config.sampleInterval * 1000)))
@@ -115,11 +132,7 @@ final class TestCoordinator {
                         samples.append(sample)
                         if samples.count > maxSamples { samples.removeFirst() }
                         latest = sample
-                        archiveBuffer.append(sample)
-                        if archiveBuffer.count >= SampleArchive.batchSize {
-                            SampleArchive.append(archiveBuffer, uuid: runUUID)
-                            archiveBuffer.removeAll(keepingCapacity: true)
-                        }
+                        record(sample)
                     } catch {
                         consecutiveReadFailures += 1
                         lastTelemetryError = error.localizedDescription
@@ -139,16 +152,37 @@ final class TestCoordinator {
         }
 
         await cleanup()
-
-        // Flush any buffered samples, then build the record with the archive path.
         flushArchive()
 
-        // Build RunRecord
-        let snapshot = samples
-        let analysis = RunAnalyzer.analyze(samples: snapshot, config: testConfig)
-        let run = Self.buildRunRecord(snapshot: snapshot, analysis: analysis, config: config,
-                                      archivePath: archivePath())
-        state = .complete(run)
+        // Single finalization owner: the main task decides the final state.
+        switch finishReason {
+        case .discarded:
+            samples.removeAll()
+            archiveBuffer.removeAll()
+            SampleArchive.deleteFiles(uuid: runUUID)
+            state = .discarded
+        case .saveInterrupted:
+            state = Self.cancelledRecord(samples: samples, config: testConfig,
+                                         archivePath: archivePath(), uuid: runUUID)
+                .map { State.cancelled($0) }
+                ?? .discarded
+        case nil:
+            let analysis = accumulator.makeAnalysis(config: testConfig)
+            let run = Self.buildRunRecord(analysis: analysis, config: config,
+                                          archivePath: archivePath(), uuid: runUUID,
+                                          lastSample: accumulator.lastSample)
+            state = .complete(run)
+        }
+    }
+
+    /// Fold a sample into the streaming summary and archive buffer.
+    private func record(_ sample: TelemetrySample) {
+        accumulator.add(sample)
+        guard !archiveUnhealthy else { return }
+        archiveBuffer.append(sample)
+        if archiveBuffer.count >= SampleArchive.batchSize {
+            flushArchive()
+        }
     }
 
     /// Manually finish Monitor Only recording
@@ -159,32 +193,33 @@ final class TestCoordinator {
 
 
     /// Stop and keep current data (Stop button / Monitor Only finish).
+    /// Only requests the stop — the main start() task performs the finalization.
     func stopAndSave() {
         cancelledFlag = true
-        Task { await telemetry.stopTelemetry() }
-        stopWorkload()
-        flushArchive()
-        state = Self.cancelledRecord(samples: samples, config: testConfig, archivePath: archivePath())
-            .map { State.cancelled($0) }
-            ?? .discarded
+        untilStoppedFlag = true
+        finishReason = .saveInterrupted
     }
 
     /// Discard current data without saving (Discard button).
+    /// Only requests the stop — the main start() task performs the finalization.
     func cancelAndDiscard() {
         cancelledFlag = true
-        Task { await telemetry.stopTelemetry() }
-        stopWorkload()
-        samples.removeAll()
-        archiveBuffer.removeAll()
-        SampleArchive.deleteFiles(uuid: runUUID)
-        state = .discarded
+        untilStoppedFlag = true
+        finishReason = .discarded
     }
 
-    /// Flush buffered samples to the archive file.
+    /// Flush buffered samples to the archive file. On failure the buffer is
+    /// kept (never silently dropped) and the error is surfaced to the UI.
     private func flushArchive() {
         guard !archiveBuffer.isEmpty else { return }
-        SampleArchive.append(archiveBuffer, uuid: runUUID)
-        archiveBuffer.removeAll(keepingCapacity: true)
+        do {
+            try SampleArchive.append(archiveBuffer, uuid: runUUID)
+            archiveBuffer.removeAll(keepingCapacity: true)
+        } catch {
+            archiveUnhealthy = true
+            archiveError = "Sample archive write failed: \(error.localizedDescription)"
+            print("[Coordinator] \(archiveError ?? "")")
+        }
     }
 
     private func archivePath() -> String? {
@@ -194,12 +229,15 @@ final class TestCoordinator {
     /// Build a final RunRecord for an interrupted run. Returns nil when there
     /// is nothing worth saving. Extracted so tests exercise the real path.
     static func cancelledRecord(samples: [TelemetrySample], config: TestConfiguration,
-                                archivePath: String? = nil) -> RunRecord? {
+                                archivePath: String? = nil,
+                                uuid: String = UUID().uuidString) -> RunRecord? {
         guard !samples.isEmpty else { return nil }
-        let snapshot = samples
-        let analysis = RunAnalyzer.analyze(samples: snapshot, config: config)
-        let run = buildRunRecord(snapshot: snapshot, analysis: analysis, config: config,
-                                 archivePath: archivePath)
+        var acc = RunAccumulator()
+        acc.add(samples)
+        let analysis = acc.makeAnalysis(config: config)
+        let run = buildRunRecord(analysis: analysis, config: config,
+                                 archivePath: archivePath, uuid: uuid,
+                                 lastSample: acc.lastSample)
         run.phaseRaw = TestPhase.cancelled.rawValue
         run.wasInterrupted = true
         return run
@@ -213,9 +251,11 @@ final class TestCoordinator {
 
     // MARK: - Run Construction
 
-    private static func buildRunRecord(snapshot: [TelemetrySample], analysis: RunAnalysis, config: TestConfiguration,
-                                       archivePath: String?) -> RunRecord {
+    private static func buildRunRecord(analysis: RunAnalysis, config: TestConfiguration,
+                                       archivePath: String?, uuid: String,
+                                       lastSample: TelemetrySample?) -> RunRecord {
         let run = RunRecord(config: config)
+        run.uuid = uuid
         run.sampleCount = analysis.sampleCount
         run.duration = analysis.duration
         run.completedAt = Date()
@@ -233,10 +273,12 @@ final class TestCoordinator {
         run.macOSVersion = dev.macOSVersion
         run.metalDeviceName = dev.metalDeviceName ?? ""
 
-        run.cpuPeakPower = analysis.cpuPeakPower ?? 0
-        run.cpuPeakTemp = analysis.cpuPeakTemp ?? 0
-        run.gpuPeakTemp = analysis.gpuPeakTemp ?? 0
-        run.pClusterMinFreq = analysis.pCorePeakFreq ?? 0
+        // Optional-aware metrics — unavailable stays nil, never a fake 0.
+        run.cpuPeakPower = analysis.cpuPeakPower
+        run.cpuPeakTemp = analysis.cpuPeakTemp
+        run.gpuPeakTemp = analysis.gpuPeakTemp
+        run.gpuPeakPower = analysis.gpuPeakPower
+        run.pClusterPeakFreq = analysis.pCorePeakFreq
         run.dataCoverage = analysis.overallCoverage
         run.appVersion = BuildIdentity.appVersion
 
@@ -245,18 +287,15 @@ final class TestCoordinator {
         run.telemetryCoreVersion = String(cString: tb_telemetry_core_version())
 
         // Power source + low-power-mode snapshot (last sample)
-        if let last = snapshot.last {
+        if let last = lastSample {
             run.acConnected = last.acConnected
             run.batteryPercent = last.batteryPercent
             run.lowPowerMode = last.lowPowerMode
         }
 
-        // Samples: new file-backed archive, or legacy inline JSON.
+        // Samples: new file-backed archive (path), or legacy inline JSON.
         if let archivePath {
             run.dataDirectory = archivePath
-        } else if let data = try? JSONEncoder().encode(snapshot),
-                  let json = String(data: data, encoding: .utf8) {
-            run.dataDirectory = json
         }
 
         if config.mode == .monitorOnly {

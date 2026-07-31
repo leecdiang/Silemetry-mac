@@ -51,9 +51,10 @@ static void detect_topology(uint32_t count) {
         return;
     }
 
-    // Fallback: assume first half E, second half P
-    g_e_count = count / 2;
-    g_p_count = count - g_e_count;
+    // Fallback: topology unknown — do NOT guess a half/half P/E split.
+    // All cores are classified as unknown instead of being mislabeled.
+    g_p_count = 0;
+    g_e_count = 0;
 }
 
 CoreUtilSnapshot core_util_snapshot(void) {
@@ -111,11 +112,13 @@ CoreUtilSnapshot core_util_snapshot(void) {
                 snap.cores[i].utilization_percent = (double)delta_active / (double)delta_total * 100.0;
             }
             
-            // Classify: M4 verified pattern (0-5 E, 6-9 P) or fallback
+            // Classify by detected topology; unknown when not resolved
             if (i < g_e_count) {
                 snap.cores[i].kind = 0; // efficiency
-            } else {
+            } else if (i < g_e_count + g_p_count) {
                 snap.cores[i].kind = 1; // performance
+            } else {
+                snap.cores[i].kind = 2; // unknown
             }
         }
     } else {
@@ -124,7 +127,8 @@ CoreUtilSnapshot core_util_snapshot(void) {
             snap.cores[i].logical_index = i;
             snap.cores[i].valid = 0; // waiting
             if (i < g_e_count) snap.cores[i].kind = 0;
-            else snap.cores[i].kind = 1;
+            else if (i < g_e_count + g_p_count) snap.cores[i].kind = 1;
+            else snap.cores[i].kind = 2;
         }
     }
     

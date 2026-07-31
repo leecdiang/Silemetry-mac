@@ -44,7 +44,7 @@ struct TestConfiguration: Codable, Equatable {
     var transitionDuration: TimeInterval = 5
     var cooldownDuration: TimeInterval = 300
     var sampleInterval: TimeInterval = 1.0
-    var ambientTemperature: Double = 25.0
+    var ambientTemperature: Double?
     var name: String = ""
     var tags: [String] = []
     var notes: String = ""
@@ -139,16 +139,20 @@ final class RunRecord {
 
     // ── Extended snapshot (analysis provenance / environment) ──
     var lowPowerMode: Bool?
-    var ambientTemperature: Double = 0
+    var ambientTemperature: Double?
     var analysisVersion: Int = 0
     var baselineDuration: TimeInterval = 0
     var cooldownDuration: TimeInterval = 0
     var telemetryCoreVersion: String = ""
 
-    // ── Summary metrics ──
-    var cpuPeakPower: Double = 0
-    var cpuPeakTemp: Double = 0
-    var gpuPeakTemp: Double = 0
+    // ── Summary metrics (nil = channel unavailable, never a fake 0) ──
+    var cpuPeakPower: Double?
+    var cpuPeakTemp: Double?
+    var gpuPeakTemp: Double?
+    var gpuPeakPower: Double?
+    /// Peak P-cluster frequency (was misnamed pClusterMinFreq).
+    var pClusterPeakFreq: Double?
+    /// Legacy field — kept for old stores, no longer written.
     var pClusterMinFreq: Double = 0
     var steadyPower: Double = 0
     var steadyTemp: Double = 0

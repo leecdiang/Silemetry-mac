@@ -35,6 +35,14 @@ struct TelemetrySample: Identifiable, Codable {
     var lowPowerMode: Bool = false
     var thermalState: ThermalStateTag = .unknown
     var cpuUtilization: Double?
+    // Per-channel availability (CPU/GPU/p/e independent)
+    var cpuTempValid: Bool = false
+    var gpuTempValid: Bool = false
+    var cpuPowerValid: Bool = false
+    var gpuPowerValid: Bool = false
+    var pFrequencyValid: Bool = false
+    var eFrequencyValid: Bool = false
+    // Aggregate flags (kept for compatibility; any channel of that kind)
     var tempValid: Bool = false
     var powerValid: Bool = false
     var freqValid: Bool = false
@@ -145,16 +153,17 @@ actor TelemetryService {
             s.elapsedSeconds = Double(DispatchTime.now().uptimeNanoseconds - startMonotonicNs) / 1_000_000_000
             s.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
 
-            // Temperature
+            // Temperature — per-channel
             if (raw.available_mask & TB_AVAIL_CPU_TEMP) != 0 {
                 s.cpuTemp = raw.cpu_temperature_avg_c
-                s.tempValid = true
+                s.cpuTempValid = true
             }
             if (raw.available_mask & TB_AVAIL_CPU_TEMP_HOTTEST) != 0 {
                 s.cpuTempHottest = raw.cpu_temperature_hottest_c
             }
             if (raw.available_mask & TB_AVAIL_GPU_TEMP) != 0 {
                 s.gpuTemp = raw.gpu_temperature_avg_c
+                s.gpuTempValid = true
             }
             if (raw.available_mask & TB_AVAIL_GPU_TEMP_HOTTEST) != 0 {
                 s.gpuTempHottest = raw.gpu_temperature_hottest_c
@@ -166,25 +175,27 @@ actor TelemetryService {
                 s.gpuTempSensorCount = Int(raw.gpu_temperature_sensor_count)
             }
 
-            // Power
+            // Power — per-channel
             if (raw.available_mask & TB_AVAIL_CPU_POWER) != 0 {
                 s.cpuPower = raw.cpu_power_w
-                s.powerValid = true
+                s.cpuPowerValid = true
             }
             if (raw.available_mask & TB_AVAIL_GPU_POWER) != 0 {
                 s.gpuPower = raw.gpu_power_w
+                s.gpuPowerValid = true
             }
             if (raw.available_mask & TB_AVAIL_PACKAGE_POWER) != 0 {
                 s.packagePower = raw.package_power_w
             }
 
-            // Frequency
+            // Frequency — per-channel
             if (raw.available_mask & TB_AVAIL_P_FREQ) != 0 {
                 s.pClusterFreqMHz = raw.p_cluster_frequency_mhz
-                s.freqValid = true
+                s.pFrequencyValid = true
             }
             if (raw.available_mask & TB_AVAIL_E_FREQ) != 0 {
                 s.eClusterFreqMHz = raw.e_cluster_frequency_mhz
+                s.eFrequencyValid = true
             }
 
             // Utilization
@@ -211,6 +222,11 @@ actor TelemetryService {
             case .critical: s.thermalState = .critical
             @unknown default: s.thermalState = .unknown
             }
+
+            // Aggregate availability flags (any channel of that kind)
+            s.tempValid = s.cpuTempValid || s.gpuTempValid
+            s.powerValid = s.cpuPowerValid || s.gpuPowerValid
+            s.freqValid = s.pFrequencyValid || s.eFrequencyValid
 
             continuation.resume(returning: s)
 
