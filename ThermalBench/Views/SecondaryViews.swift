@@ -905,6 +905,17 @@ struct CompareView: View {
 
 // MARK: - Diagnostics View
 
+// Morandi (low-saturation) palette — blue family with distinct depths.
+extension Color {
+    static let morandiBlue      = Color(red: 0.55, green: 0.66, blue: 0.72) // mid dusty blue
+    static let morandiBlueDeep  = Color(red: 0.44, green: 0.57, blue: 0.67) // deep slate blue
+    static let morandiBlueLight = Color(red: 0.66, green: 0.75, blue: 0.81) // light dusty blue
+    static let morandiSlate     = Color(red: 0.50, green: 0.58, blue: 0.65) // blue-grey
+    static let morandiYellow    = Color(red: 0.78, green: 0.72, blue: 0.52)
+}
+
+// MARK: - Diagnostics View
+
 // MARK: - Diagnostics
 
 private struct DiagnosticRow: View {
@@ -979,49 +990,55 @@ struct DiagnosticsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 deviceHeader(dev)
 
-                DiagSection(title: "Hardware", icon: "cpu", tint: .blue) {
-                    DiagnosticRow(icon: "cpu", iconColor: .blue, label: "Chip", value: dev.chipName)
-                    DiagnosticRow(icon: "macbook", iconColor: .blue, label: "Model Identifier", value: dev.modelIdentifier)
-                    DiagnosticRow(icon: "circle.grid.2x2", iconColor: .blue, label: "CPU Cores", value: dev.coreSummary)
+                DiagSection(title: "Hardware", icon: "cpu", tint: .morandiBlueDeep) {
+                    DiagnosticRow(icon: "cpu", iconColor: .morandiBlueDeep, label: "Chip", value: dev.chipName)
+                    DiagnosticRow(icon: "macbook", iconColor: .morandiBlueDeep, label: "Model Identifier", value: dev.modelIdentifier)
+                    DiagnosticRow(icon: "circle.grid.2x2", iconColor: .morandiBlueDeep, label: "CPU Cores", value: dev.coreSummary)
                     if let gpu = dev.gpuCoreCount {
-                        DiagnosticRow(icon: "gpu", iconColor: .blue, label: "GPU Cores", value: "\(gpu)")
+                        DiagnosticRow(icon: "gpu", iconColor: .morandiBlueDeep, label: "GPU Cores", value: "\(gpu)")
                     }
-                    DiagnosticRow(icon: "square.3.layers.3d", iconColor: .blue, label: "Metal Device",
+                    DiagnosticRow(icon: "square.3.layers.3d", iconColor: .morandiBlueDeep, label: "Metal Device",
                                  value: dev.metalDeviceName ?? "N/A",
-                                 status: dev.metalDeviceName == nil ? .yellow : .green)
-                    DiagnosticRow(icon: "memorychip", iconColor: .blue, label: "Memory", value: dev.formattedMemory)
-                    DiagnosticRow(icon: "internaldrive", iconColor: .blue, label: "Storage", value: storageSummary)
-                    DiagnosticRow(icon: "cpu.and.ram", iconColor: .blue, label: "Architecture", value: architecture)
+                                 status: dev.metalDeviceName == nil ? .morandiYellow : .morandiBlueDeep)
+                    DiagnosticRow(icon: "memorychip", iconColor: .morandiBlueDeep, label: "Memory", value: dev.formattedMemory)
+                    DiagnosticRow(icon: "internaldrive", iconColor: .morandiBlueDeep, label: "Storage", value: storageSummary)
+                    DiagnosticRow(icon: "desktopcomputer", iconColor: .morandiBlueDeep, label: "Architecture", value: architecture)
                 }
 
-                DiagSection(title: "Battery & Power", icon: "battery.75percent", tint: .green) {
-                    DiagnosticRow(icon: "bolt.fill", iconColor: .green, label: "Power Source",
-                                 value: powerSourceLabel, status: powerSourceOK ? .green : .yellow)
-                    DiagnosticRow(icon: "battery.75percent", iconColor: .green, label: "Battery",
+                DiagSection(title: "Battery & Power", icon: "battery.75percent", tint: .morandiBlue) {
+                    DiagnosticRow(icon: "bolt.fill", iconColor: .morandiBlue, label: "Power Source",
+                                 value: powerSourceLabel, status: powerSourceOK ? .morandiBlue : .morandiYellow)
+                    DiagnosticRow(icon: "battery.75percent", iconColor: .morandiBlue, label: "Battery",
                                  value: batteryLevelLabel)
-                    DiagnosticRow(icon: "leaf", iconColor: .green, label: "Low Power Mode",
+                    DiagnosticRow(icon: "leaf", iconColor: .morandiBlue, label: "Low Power Mode",
                                  value: ProcessInfo.processInfo.isLowPowerModeEnabled ? "ON" : "OFF",
-                                 status: ProcessInfo.processInfo.isLowPowerModeEnabled ? .yellow : .green)
+                                 status: ProcessInfo.processInfo.isLowPowerModeEnabled ? .morandiYellow : .morandiBlue)
                 }
 
-                DiagSection(title: "Software", icon: "app.badge", tint: .purple) {
-                    DiagnosticRow(icon: "apple.logo", iconColor: .purple, label: "macOS", value: dev.macOSVersion)
-                    DiagnosticRow(icon: "number", iconColor: .purple, label: "App Version", value: BuildIdentity.appVersion)
-                    DiagnosticRow(icon: "chevron.left.forwardslash.chevron.right", iconColor: .purple, label: "Git Commit", value: BuildIdentity.gitSHA)
-                    DiagnosticRow(icon: "clock", iconColor: .purple, label: "Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
+                DiagSection(title: "Software", icon: "app.badge", tint: .morandiBlueLight) {
+                    DiagnosticRow(icon: "apple.logo", iconColor: .morandiBlueLight, label: "macOS", value: dev.macOSVersion)
+                    DiagnosticRow(icon: "number", iconColor: .morandiBlueLight, label: "App Version", value: BuildIdentity.appVersion)
+                    DiagnosticRow(icon: "chevron.left.forwardslash.chevron.right", iconColor: .morandiBlueLight, label: "Git Commit", value: BuildIdentity.gitSHA)
+                    DiagnosticRow(icon: "clock", iconColor: .morandiBlueLight, label: "Build Time", value: BuildIdentity.buildTimestampUTC + " UTC")
                 }
 
-                DiagSection(title: "Telemetry Architecture", icon: "waveform.path.ecg", tint: .orange) {
-                    DiagnosticRow(icon: "shippingbox", iconColor: .orange, label: "Core", value: "Embedded Rust macmon (vendored)")
-                    DiagnosticRow(icon: "number.circle", iconColor: .orange, label: "Core Version", value: telemetryCoreVersion)
-                    DiagnosticRow(icon: "thermometer.medium", iconColor: .orange, label: "Temperature", value: "Apple SMC sensor aggregation")
-                    DiagnosticRow(icon: "bolt.fill", iconColor: .orange, label: "Power", value: "IOReport via embedded library")
-                    DiagnosticRow(icon: "waveform", iconColor: .orange, label: "Frequency", value: "IOReport via embedded library")
-                    DiagnosticRow(icon: "square.grid.3x3", iconColor: .orange, label: "Per-Core", value: "\(dev.coreSummary) via host_processor_info")
-                    DiagnosticRow(icon: "lock.shield", iconColor: .orange, label: "Privileges", value: "No sudo")
+                DiagSection(title: "Telemetry Architecture", icon: "waveform.path.ecg", tint: .morandiSlate) {
+                    DiagnosticRow(icon: "shippingbox", iconColor: .morandiSlate, label: "Core", value: "Embedded Rust macmon (vendored)")
+                    DiagnosticRow(icon: "number.circle", iconColor: .morandiSlate, label: "Core Version", value: telemetryCoreVersion)
+                    DiagnosticRow(icon: "thermometer.medium", iconColor: .morandiSlate, label: "Temperature", value: "Apple SMC sensor aggregation")
+                    DiagnosticRow(icon: "bolt.fill", iconColor: .morandiSlate, label: "Power", value: "IOReport via embedded library")
+                    DiagnosticRow(icon: "waveform", iconColor: .morandiSlate, label: "Frequency", value: "IOReport via embedded library")
+                    DiagnosticRow(icon: "square.grid.3x3", iconColor: .morandiSlate, label: "Per-Core", value: "\(dev.coreSummary) via host_processor_info")
+                    DiagnosticRow(icon: "lock.shield", iconColor: .morandiSlate, label: "Privileges", value: "No sudo")
                 }
             }
-            .padding(24)
+
+            Text("© 2026 LEEcDiang")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+                .padding(24)
         }
         .onAppear {
             let batt = tb_read_battery()
@@ -1040,7 +1057,7 @@ struct DiagnosticsView: View {
         HStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(LinearGradient(colors: [.blue.opacity(0.85), .purple.opacity(0.75)],
+                    .fill(LinearGradient(colors: [.morandiBlueDeep, .morandiBlueLight],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 64, height: 64)
                 Image(systemName: "cpu")
