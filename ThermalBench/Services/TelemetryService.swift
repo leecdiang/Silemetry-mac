@@ -51,6 +51,12 @@ actor TelemetryService {
     private let queue = DispatchQueue(label: "com.leecdiang.thermalbench.telemetry")
 
     func startTelemetry() async throws {
+        // Each call creates a fresh Rust sampler, so starting twice without an
+        // intervening stop would overwrite `handle` and leak the previous one.
+        guard handle == nil else {
+            throw TelemetryError.initialization("telemetry already started")
+        }
+
         isRunning = true
         startMonotonicNs = DispatchTime.now().uptimeNanoseconds
         sampleCount = 0
@@ -196,10 +202,25 @@ actor TelemetryService {
 
     func stopTelemetry() async {
         isRunning = false
-        if let h = handle {
-            tb_telemetry_stop(h)
-            tb_telemetry_destroy(h)
-            handle = nil
+        guard let h = handle else { return }
+
+        // Clear the stored handle first. `readSample` reads it before suspending, so
+        // from here on no new FFI call can pick this pointer up.
+        handle = nil
+
+        // Signal the Rust sampler to wind down. This makes any `wait_next` that is
+        // currently blocked on `queue` return TB_ERR_STOPPED promptly instead of
+        // running out its full timeout.
+        tb_telemetry_stop(h)
+
+        // Free the sampler *on `queue`*. Reads run on that same serial queue, so this
+        // block is ordered behind any in-flight `wait_next` and cannot pull the
+        // allocation out from under it — the use-after-free this guards against.
+        await withCheckedContinuation { continuation in
+            queue.async {
+                tb_telemetry_destroy(h)
+                continuation.resume()
+            }
         }
     }
 }
