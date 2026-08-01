@@ -33,6 +33,10 @@ final class TestCoordinator {
     private var untilStoppedFlag = false
     /// UUID for the run being recorded — determines the archive file path.
     private var runUUID = UUID().uuidString
+    /// When the current run actually started — RunRecord.createdAt is built
+    /// only at finalization, so without this the "Started" time would be the
+    /// end time.
+    private var runStartedAt = Date()
     /// Samples awaiting flush to the archive file (streamed, not held forever).
     private var archiveBuffer: [TelemetrySample] = []
     /// True once the archive write failed — stop buffering to avoid unbounded growth.
@@ -58,6 +62,9 @@ final class TestCoordinator {
         finishReason = nil
         archiveError = nil
         archiveUnhealthy = false
+        consecutiveReadFailures = 0
+        lastTelemetryError = nil
+        runStartedAt = Date()
         runUUID = UUID().uuidString
         archiveBuffer.removeAll(keepingCapacity: true)
         samples.removeAll()
@@ -70,14 +77,17 @@ final class TestCoordinator {
         let startTime = DispatchTime.now().uptimeNanoseconds
 
         if config.mode == .monitorOnly {
-            // Monitor Only: single infinite monitoring phase
-            currentPhase = .baseline
+            // Monitor Only: single infinite monitoring phase. Distinct phase
+            // so Timeline/JSONL can tell real Baseline from External Workload.
+            currentPhase = .monitoringExternal
             while !untilStoppedFlag && !cancelledFlag && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(Int(config.sampleInterval * 1000)))
 
                 do {
                     var sample = try await telemetry.readSample()
-                    sample.phase = .baseline
+                    sample.phase = .monitoringExternal
+                    consecutiveReadFailures = 0
+                    lastTelemetryError = nil
                     samples.append(sample)
                     if samples.count > maxSamples { samples.removeFirst() }
                     latest = sample
@@ -162,15 +172,26 @@ final class TestCoordinator {
             SampleArchive.deleteFiles(uuid: runUUID)
             state = .discarded
         case .saveInterrupted:
-            state = Self.cancelledRecord(samples: samples, config: testConfig,
-                                         archivePath: archivePath(), uuid: runUUID)
-                .map { State.cancelled($0) }
-                ?? .discarded
+            // Build from the streaming accumulator, NOT the UI ring buffer —
+            // after hours of running, `samples` only holds the last 7200 and
+            // early peaks would vanish from the interrupted record's Summary,
+            // History and Compare.
+            let analysis = accumulator.makeAnalysis(config: testConfig)
+            let run = Self.buildRunRecord(analysis: analysis, config: testConfig,
+                                          archivePath: archivePath(), uuid: runUUID,
+                                          lastSample: accumulator.lastSample,
+                                          startedAt: runStartedAt)
+            run.wasInterrupted = true
+            run.phaseRaw = TestPhase.cancelled.rawValue
+            applyRawDataStatus(run)
+            state = .cancelled(run)
         case nil:
             let analysis = accumulator.makeAnalysis(config: testConfig)
             let run = Self.buildRunRecord(analysis: analysis, config: config,
                                           archivePath: archivePath(), uuid: runUUID,
-                                          lastSample: accumulator.lastSample)
+                                          lastSample: accumulator.lastSample,
+                                          startedAt: runStartedAt)
+            applyRawDataStatus(run)
             state = .complete(run)
         }
     }
@@ -222,12 +243,25 @@ final class TestCoordinator {
         }
     }
 
+    /// Record the integrity of the raw sample archive on the final RunRecord
+    /// so the UI can warn when the Summary and the raw curve disagree.
+    private func applyRawDataStatus(_ run: RunRecord) {
+        guard archiveUnhealthy else { return }
+        run.rawDataStatusRaw = (SampleArchive.hasData(uuid: runUUID)
+            ? RawDataStatus.partial : RawDataStatus.unavailable).rawValue
+        run.rawDataError = archiveError
+    }
+
     private func archivePath() -> String? {
         SampleArchive.samplesFile(for: runUUID).path
     }
 
     /// Build a final RunRecord for an interrupted run. Returns nil when there
-    /// is nothing worth saving. Extracted so tests exercise the real path.
+    /// is nothing worth saving.
+    ///
+    /// NOTE: production interrupted runs now finalize through the streaming
+    /// accumulator in `start()`; this sample-array variant is kept for the
+    /// test fixtures that exercise the legacy path.
     static func cancelledRecord(samples: [TelemetrySample], config: TestConfiguration,
                                 archivePath: String? = nil,
                                 uuid: String = UUID().uuidString) -> RunRecord? {
@@ -253,9 +287,11 @@ final class TestCoordinator {
 
     private static func buildRunRecord(analysis: RunAnalysis, config: TestConfiguration,
                                        archivePath: String?, uuid: String,
-                                       lastSample: TelemetrySample?) -> RunRecord {
+                                       lastSample: TelemetrySample?,
+                                       startedAt: Date? = nil) -> RunRecord {
         let run = RunRecord(config: config)
         run.uuid = uuid
+        run.createdAt = startedAt ?? Date()
         run.sampleCount = analysis.sampleCount
         run.duration = analysis.duration
         run.completedAt = Date()

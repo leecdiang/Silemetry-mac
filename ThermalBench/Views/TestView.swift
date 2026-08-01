@@ -8,6 +8,8 @@ struct TestView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var showStopConfirm = false
     @State private var showCancelConfirm = false
+    @State private var failureMessage: String?
+    @State private var showFailure = false
 
     enum CoreKind { case efficiency, performance }
 
@@ -74,6 +76,12 @@ struct TestView: View {
                 // Explicitly discarded — nothing to persist.
                 app.route = .home
                 app.resetForNewRun()
+            }
+            if case .failed(let message) = newState {
+                // Telemetry failure — surface it; the coordinator has already
+                // cleaned up, so this is the only feedback the user gets.
+                failureMessage = message
+                showFailure = true
             }
         }
     }
@@ -236,6 +244,11 @@ struct TestView: View {
             Spacer()
             VStack(alignment: .trailing) {
                 Text("\(samples.count) samples").font(.caption).foregroundStyle(.secondary)
+                if coord.archiveError != nil {
+                    Label("Raw sample archive incomplete", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(.orange)
+                        .help(coord.archiveError ?? "")
+                }
                 if coord.isMonitorOnly {
                     ViewThatFits {
                         Text("External Workload").font(.caption2).foregroundStyle(.tertiary)
@@ -258,6 +271,14 @@ struct TestView: View {
             Button("Discard", role: .destructive) { discardTest() }
         } message: {
             Text("Data will not be saved.")
+        }
+        .alert("Test Failed", isPresented: $showFailure) {
+            Button("OK") {
+                app.route = .home
+                app.resetForNewRun()
+            }
+        } message: {
+            Text(failureMessage ?? "Unknown failure")
         }
     }
 

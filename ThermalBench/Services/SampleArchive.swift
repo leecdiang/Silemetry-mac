@@ -55,7 +55,13 @@ enum SampleArchive {
     /// Load all samples for a run. Handles both new file-backed and legacy
     /// inline-JSON storage.
     static func load(from run: RunRecord) -> [TelemetrySample] {
-        let path = run.dataDirectory
+        load(dataDirectory: run.dataDirectory)
+    }
+
+    /// Load samples from a stored data directory string (file path for new
+    /// runs, inline JSON for legacy runs). String-only so it can be called
+    /// from background tasks without touching SwiftData objects.
+    static func load(dataDirectory path: String) -> [TelemetrySample] {
         guard !path.isEmpty else { return [] }
 
         // New format: absolute path to samples.jsonl
@@ -100,5 +106,15 @@ enum SampleArchive {
     static func deleteFiles(uuid: String) {
         try? FileManager.default.removeItem(at: samplesFile(for: uuid))
         try? FileManager.default.removeItem(at: directory(for: uuid))
+    }
+
+    /// True when the run's JSONL file exists and contains data. Used to
+    /// distinguish "partial" (some writes landed) from "unavailable" (nothing
+    /// was ever persisted) after an archive failure.
+    static func hasData(uuid: String) -> Bool {
+        let file = samplesFile(for: uuid)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let size = attrs[.size] as? Int, size > 0 else { return false }
+        return true
     }
 }

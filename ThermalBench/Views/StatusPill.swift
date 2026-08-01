@@ -72,6 +72,7 @@ extension TestPhase {
         case .idle:        "Idle"
         case .preflight:   "Preflight"
         case .baseline:    "Baseline"
+        case .monitoringExternal: "External Load"
         case .loading:     "CPU Load"
         case .transition:  "Transition"
         case .cooling:     "Cooldown"
@@ -87,6 +88,7 @@ extension TestPhase {
         case .idle:        "Idle"
         case .preflight:   "Check"
         case .baseline:    "Base"
+        case .monitoringExternal: "Ext"
         case .loading:     "Load"
         case .transition:  "Trans"
         case .cooling:     "Cool"
@@ -100,6 +102,7 @@ extension TestPhase {
     var pillColor: Color {
         switch self {
         case .baseline:   .blue
+        case .monitoringExternal: .teal
         case .loading:    .red
         case .transition: .orange
         case .cooling:    .green

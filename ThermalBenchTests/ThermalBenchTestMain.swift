@@ -311,14 +311,49 @@ func runAllTests() {
         try assertTrue(r.warnings.contains { $0.id == "powerMode_diff" })
     }
 
-    test("Compare: ambient diff flagged (info, no downgrade)") {
+    test("Compare: ambient diff >2°C downgrades") {
         let a = RunRecord.make(ambient: 25)
         let b = RunRecord.make(ambient: 30)
         let r = CompareAnalyzer.analyze(a: a, b: b)
         let f = r.fields.first { $0.id == "ambient" }
         try assertNotNil(f)
         try assertFalse(f!.match)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.warnings.contains { $0.id == "ambient_diff" })
+    }
+
+    test("Compare: small ambient diff within tolerance stays comparable") {
+        let a = RunRecord.make(ambient: 25)
+        let b = RunRecord.make(ambient: 26)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
         try assertEqual(r.level, .highlyComparable)
+    }
+
+    test("Compare: ambient not recorded on either side warns") {
+        let a = RunRecord.make()
+        let b = RunRecord.make()
+        a.ambientTemperature = nil
+        b.ambientTemperature = nil
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertTrue(r.warnings.contains { $0.id == "ambient_unverified" })
+        try assertEqual(r.level, .comparableWithWarnings)
+    }
+
+    test("Compare: key metadata missing on both sides warns") {
+        let a = RunRecord.make(workload: "", cpuCores: "", gpuIntensity: "", sampleInterval: 0)
+        let b = RunRecord.make(workload: "", cpuCores: "", gpuIntensity: "", sampleInterval: 0)
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.warnings.contains { $0.id == "workload_both_legacy" })
+        try assertTrue(r.warnings.contains { $0.id == "cpuCores_both_legacy" })
+        try assertTrue(r.warnings.contains { $0.id == "sampleInterval_both_legacy" })
+    }
+
+    test("Monitor Only uses distinct external phase") {
+        try assertEqual(TestPhase.monitoringExternal.rawValue, "monitoringExternal")
+        try assertEqual(TestPhase.monitoringExternal.displayLabel, "External Load")
+        let decoded = TestPhase(rawValue: TestPhase.monitoringExternal.rawValue)
+        try assertEqual(decoded, .monitoringExternal)
     }
 
     // ── SampleArchive ──────────────────────────────────────────────────
@@ -439,6 +474,30 @@ func runAllTests() {
             TestCoordinator.cancelledRecord(samples: [], config: TestConfiguration())
         }
         try assertNil(run)
+    }
+
+    // ── Raw archive integrity (Summary vs raw curve consistency) ────────
+    test("RawDataStatus defaults to complete") {
+        let run = RunRecord(config: TestConfiguration())
+        try assertEqual(run.rawDataStatusRaw, RawDataStatus.complete.rawValue)
+        try assertNil(run.rawDataError)
+    }
+
+    test("RawDataStatus display names") {
+        try assertEqual(RawDataStatus.complete.displayName, "Complete")
+        try assertEqual(RawDataStatus.partial.displayName, "Partial")
+        try assertEqual(RawDataStatus.unavailable.displayName, "Unavailable")
+    }
+
+    test("SampleArchive.hasData distinguishes written from empty") {
+        let uuid = "rawstatus-\(UUID().uuidString)"
+        try assertFalse(SampleArchive.hasData(uuid: uuid))
+        var s = TelemetrySample()
+        s.cpuTempHottest = 50
+        try SampleArchive.append([s], uuid: uuid)
+        try assertTrue(SampleArchive.hasData(uuid: uuid))
+        SampleArchive.deleteFiles(uuid: uuid)
+        try assertFalse(SampleArchive.hasData(uuid: uuid))
     }
 
     // ── RunRecord device info ───────────────────────────────────────────

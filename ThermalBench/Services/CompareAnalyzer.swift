@@ -65,7 +65,7 @@ struct ComparabilityResult: Equatable {
 enum CompareAnalyzer {
 
     /// Current analysis version — bump when check logic changes.
-    static let analysisVersion = 1
+    static let analysisVersion = 2
 
     static func analyze(a: RunRecord, b: RunRecord) -> ComparabilityResult {
         var warnings: [ComparabilityWarning] = []
@@ -171,18 +171,33 @@ enum CompareAnalyzer {
 
         // Ambient temperature — nil = not recorded (never a fake 25°C)
         if let ta = a.ambientTemperature, let tb = b.ambientTemperature {
-            fields.append(checkNumericField(id: "ambient", label: "Ambient Temp",
-                                            a: ta, b: tb, tolerance: 0, severity: .info,
-                                            warnings: &warnings))
-        } else if a.ambientTemperature == nil && b.ambientTemperature == nil {
+            // Absolute tolerance: > 2.0°C difference is material for thermals.
+            let diff = abs(ta - tb)
+            let match = diff <= 2.0
             fields.append(ComparabilityField(id: "ambient", label: "Ambient Temp",
-                                             valueA: "Not recorded", valueB: "Not recorded", match: true))
-        } else {
-            let fa = a.ambientTemperature.map { String(format: "%.0f°C", $0) } ?? "Not recorded"
-            let fb = b.ambientTemperature.map { String(format: "%.0f°C", $0) } ?? "Not recorded"
+                                             valueA: String(format: "%.1f°C", ta),
+                                             valueB: String(format: "%.1f°C", tb),
+                                             match: match))
+            if !match {
+                warnings.append(ComparabilityWarning(
+                    id: "ambient_diff", field: "Ambient Temp", severity: .warning,
+                    detail: String(format: "Ambient temperature differs by %.1f°C (A: %.1f°C, B: %.1f°C) — thermal results may not be comparable", diff, ta, tb)
+                ))
+            }
+        } else if a.ambientTemperature == nil && b.ambientTemperature == nil {
+            // Unknown on both sides must not silently pass as "matching".
             warnings.append(ComparabilityWarning(
-                id: "ambient_unknown", field: "Ambient Temp", severity: .info,
-                detail: "Ambient recorded for one run only (A: \(fa), B: \(fb))"
+                id: "ambient_unverified", field: "Ambient Temp", severity: .warning,
+                detail: "Ambient temperature not recorded for either run — environmental comparability unverified"
+            ))
+            fields.append(ComparabilityField(id: "ambient", label: "Ambient Temp",
+                                             valueA: "Not recorded", valueB: "Not recorded", match: false))
+        } else {
+            let fa = a.ambientTemperature.map { String(format: "%.1f°C", $0) } ?? "Not recorded"
+            let fb = b.ambientTemperature.map { String(format: "%.1f°C", $0) } ?? "Not recorded"
+            warnings.append(ComparabilityWarning(
+                id: "ambient_unknown", field: "Ambient Temp", severity: .warning,
+                detail: "Ambient recorded for one run only (A: \(fa), B: \(fb)) — environmental comparability unverified"
             ))
             fields.append(ComparabilityField(id: "ambient", label: "Ambient Temp", valueA: fa, valueB: fb, match: false))
         }
@@ -322,15 +337,16 @@ enum CompareAnalyzer {
         let legacyB = isLegacy(b) && bLegacy.map(isLegacy) ?? true
 
         if legacyA && legacyB {
+            // Both runs lack the metadata — unverifiable, not a match.
             warnings.append(ComparabilityWarning(
-                id: "\(id)_both_legacy", field: label, severity: .info,
+                id: "\(id)_both_legacy", field: label, severity: .warning,
                 detail: "Both runs lack \(label.lowercased()) metadata — match unverifiable"
             ))
             return ComparabilityField(
                 id: id, label: label,
                 valueA: "Legacy metadata unavailable",
                 valueB: "Legacy metadata unavailable",
-                match: true
+                match: false
             )
         }
         if legacyA {
@@ -401,15 +417,16 @@ enum CompareAnalyzer {
         }
 
         if legacyA && legacyB {
+            // Both runs lack the metadata — unverifiable, not a match.
             warnings.append(ComparabilityWarning(
-                id: "\(id)_both_legacy", field: label, severity: .info,
+                id: "\(id)_both_legacy", field: label, severity: .warning,
                 detail: "Both runs lack \(label.lowercased()) metadata — match unverifiable"
             ))
             return ComparabilityField(
                 id: id, label: label,
                 valueA: "Legacy metadata unavailable",
                 valueB: "Legacy metadata unavailable",
-                match: true
+                match: false
             )
         }
         if legacyA {
@@ -466,7 +483,11 @@ enum CompareAnalyzer {
 
         // Unknown on at least one side
         if a == nil && b == nil {
-            return ComparabilityField(id: "power", label: "Power Source", valueA: "Unknown", valueB: "Unknown", match: true)
+            warnings.append(ComparabilityWarning(
+                id: "power_unknown", field: "Power Source", severity: .warning,
+                detail: "Power source unknown for both runs — AC/battery state unverified"
+            ))
+            return ComparabilityField(id: "power", label: "Power Source", valueA: "Unknown", valueB: "Unknown", match: false)
         }
         if a == nil {
             warnings.append(ComparabilityWarning(
@@ -503,7 +524,11 @@ enum CompareAnalyzer {
         }
 
         if a == nil && b == nil {
-            return ComparabilityField(id: id, label: label, valueA: "Unknown", valueB: "Unknown", match: true)
+            warnings.append(ComparabilityWarning(
+                id: "\(id)_unknown", field: label, severity: .warning,
+                detail: "\(label) unknown for both runs — condition unverified"
+            ))
+            return ComparabilityField(id: id, label: label, valueA: "Unknown", valueB: "Unknown", match: false)
         }
         if a == nil {
             warnings.append(ComparabilityWarning(

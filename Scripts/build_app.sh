@@ -130,7 +130,8 @@ swiftc "${SWIFT_FLAGS[@]}" \
 if [[ -f "$BUILD_DIR/$APP_NAME" ]]; then
     echo "✅ Swift binary built"
 else
-    echo "⚠️  Swift compilation had issues—creating app bundle manually"
+    echo "❌ Swift compilation failed — no binary produced"
+    exit 1
 fi
 
 # ─── 5. Create .app Bundle ───────────────────────────────────────────────
@@ -162,23 +163,30 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
 </plist>
 PLIST
 
-# Copy binary
-if [[ -f "$BUILD_DIR/$APP_NAME" ]]; then
-    cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/"
-    chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-fi
+# Copy binary (guaranteed to exist — checked above)
+cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/"
+chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# Copy Metal library
-cp "$BUILD_DIR/default.metallib" "$APP_BUNDLE/Contents/Resources/"
+# Copy Metal library — a missing shader library would silently break the GPU workload
+cp "$BUILD_DIR/default.metallib" "$APP_BUNDLE/Contents/Resources/" || {
+    echo "❌ Metal library copy failed"
+    exit 1
+}
 
-# Copy app icon
-if ! cp "$PROJECT_DIR/Resources/ThirdParty/Streamline/Silemetry.icns" "$APP_BUNDLE/Contents/Resources/" 2>/dev/null; then
-    echo "⚠️  Icon file not found — skipping"
-fi
+# Copy app icon — release bundles must be complete
+cp "$PROJECT_DIR/Resources/ThirdParty/Streamline/Silemetry.icns" "$APP_BUNDLE/Contents/Resources/" || {
+    echo "❌ Icon copy failed (missing Silemetry.icns?) — release bundle incomplete"
+    exit 1
+}
 
-# Ad-hoc sign
+# Ad-hoc sign — signing is expected for release, so failure is fatal
 if command -v codesign &>/dev/null; then
-    codesign --force --sign - "$APP_BUNDLE" || echo "⚠️  codesign failed"
+    codesign --force --sign - "$APP_BUNDLE" || { echo "❌ codesign failed"; exit 1; }
+    codesign --verify --strict "$APP_BUNDLE" || { echo "❌ codesign verification failed"; exit 1; }
+    echo "✅ Bundle signed and verified"
+else
+    echo "❌ codesign not found — cannot sign release bundle"
+    exit 1
 fi
 
 echo "✅ $APP_BUNDLE"

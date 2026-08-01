@@ -100,7 +100,7 @@ struct ResultsView: View {
     // MARK: - Summary
 
     var summarySection: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 12) {
             summaryTile("CPU Hottest", value: run.cpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .red)
             summaryTile("GPU Hottest", value: run.gpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .purple)
             summaryTile("CPU Peak Power", value: run.cpuPeakPower.map { String(format: "%.1f W", $0) } ?? "N/A", color: .blue)
@@ -121,7 +121,7 @@ struct ResultsView: View {
     var thermalSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Metrics
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
                 summaryTile("CPU Hottest Peak", value: run.cpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .red)
                 summaryTile("GPU Hottest Peak", value: run.gpuPeakTemp.map { String(format: "%.1f °C", $0) } ?? "N/A", color: .purple)
                 summaryTile("Sensor Count", value: storedSamples.last.map { "\($0.cpuTempSensorCount) CPU" } ?? "N/A", color: .secondary)
@@ -161,8 +161,9 @@ struct ResultsView: View {
 
     var powerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
                 summaryTile("CPU Peak", value: run.cpuPeakPower.map { String(format: "%.1f W", $0) } ?? "N/A", color: .blue)
+                summaryTile("GPU Peak", value: run.gpuPeakPower.map { String(format: "%.1f W", $0) } ?? "N/A", color: .purple)
             }.padding(.horizontal)
 
             if !storedSamples.isEmpty {
@@ -317,12 +318,35 @@ struct ResultsView: View {
                 LabeledContent("Coverage", value: String(format: "%.0f%%", run.dataCoverage * 100))
                 LabeledContent("Completion", value: run.wasInterrupted ? "Interrupted" : "Completed")
                 LabeledContent("Samples stored", value: storedSamples.isEmpty ? "No" : "Yes (\(storedSamples.count))")
+                LabeledContent("Raw archive", value: rawDataStatus.displayName)
+                if rawDataStatus != .complete {
+                    Label("Raw sample data is incomplete — the Summary may include samples missing from the raw curve.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if let rawErr = run.rawDataError {
+                    Text(rawErr).font(.caption2).foregroundStyle(.secondary)
+                }
                 if !storedSamples.isEmpty {
-                    LabeledContent("CPU Temp valid", value: String(format: "%d/%d", storedSamples.filter { $0.tempValid }.count, storedSamples.count))
+                    LabeledContent("CPU Temp valid", value: channelCount(storedSamples, \.cpuTempValid))
+                    LabeledContent("GPU Temp valid", value: channelCount(storedSamples, \.gpuTempValid))
+                    LabeledContent("CPU Power valid", value: channelCount(storedSamples, \.cpuPowerValid))
+                    LabeledContent("GPU Power valid", value: channelCount(storedSamples, \.gpuPowerValid))
+                    LabeledContent("P-Freq valid", value: channelCount(storedSamples, \.pFrequencyValid))
+                    LabeledContent("E-Freq valid", value: channelCount(storedSamples, \.eFrequencyValid))
                 }
             }.padding(.horizontal)
         }
         .padding(.vertical, 12)
+    }
+
+    private var rawDataStatus: RawDataStatus {
+        RawDataStatus(rawValue: run.rawDataStatusRaw) ?? .complete
+    }
+
+    /// "<valid>/<total>" per-channel sample coverage for the Quality page.
+    private func channelCount(_ samples: [TelemetrySample], _ keyPath: KeyPath<TelemetrySample, Bool>) -> String {
+        String(format: "%d/%d", samples.filter { $0[keyPath: keyPath] }.count, samples.count)
     }
 
     // MARK: - Helpers
@@ -539,6 +563,12 @@ struct CompareView: View {
     @State private var secondID: String?
     @State private var showCompare = false
 
+    // Raw samples loaded off the main thread (full JSONL files are too big
+    // to decode synchronously in body on every redraw).
+    @State private var samplesA: [TelemetrySample]?
+    @State private var samplesB: [TelemetrySample]?
+    @State private var loadingComparison = false
+
     /// Only valid runs with data
     private var validRuns: [RunRecord] {
         runs.filter { $0.sampleCount > 0 && $0.duration > 0 && $0.dataCoverage > 0 }
@@ -581,10 +611,51 @@ struct CompareView: View {
                     firstID = validRuns[0].uuid
                     secondID = validRuns[1].uuid
                     showCompare = true
+                    loadComparisonData()
                 }
             }
-            .onChange(of: firstID) { _, _ in showCompare = firstID != nil && secondID != nil && firstID != secondID }
-            .onChange(of: secondID) { _, _ in showCompare = firstID != nil && secondID != nil && firstID != secondID }
+            .onChange(of: firstID) { _, _ in
+                showCompare = firstID != nil && secondID != nil && firstID != secondID
+                loadComparisonData()
+            }
+            .onChange(of: secondID) { _, _ in
+                showCompare = firstID != nil && secondID != nil && firstID != secondID
+                loadComparisonData()
+            }
+        }
+    }
+
+    /// Load the raw sample files for the selected runs off the main thread.
+    /// Re-checks the selection before applying so a quick re-pick can't be
+    /// overwritten by a stale load.
+    private func loadComparisonData() {
+        guard let a = runA, let b = runB, a.uuid != b.uuid else {
+            samplesA = nil
+            samplesB = nil
+            loadingComparison = false
+            return
+        }
+        let result = CompareAnalyzer.analyze(a: a, b: b)
+        guard result.canCompare else {
+            samplesA = []
+            samplesB = []
+            loadingComparison = false
+            return
+        }
+        let idA = firstID
+        let idB = secondID
+        let pathA = a.dataDirectory
+        let pathB = b.dataDirectory
+        loadingComparison = true
+        Task.detached(priority: .userInitiated) {
+            let sa = SampleArchive.load(dataDirectory: pathA)
+            let sb = SampleArchive.load(dataDirectory: pathB)
+            await MainActor.run {
+                guard idA == self.firstID, idB == self.secondID else { return }
+                self.samplesA = sa
+                self.samplesB = sb
+                self.loadingComparison = false
+            }
         }
     }
 
@@ -612,8 +683,9 @@ struct CompareView: View {
     @ViewBuilder
     func compareContent(a: RunRecord, b: RunRecord) -> some View {
         let result = CompareAnalyzer.analyze(a: a, b: b)
-        let sa = result.canCompare ? decodeSamples(run: a) : []
-        let sb = result.canCompare ? decodeSamples(run: b) : []
+        let sa = result.canCompare ? (samplesA ?? []) : []
+        let sb = result.canCompare ? (samplesB ?? []) : []
+        let loading = loadingComparison && result.canCompare
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -691,6 +763,7 @@ struct CompareView: View {
                             compareMetric("CPU Peak Temp", a: a.cpuPeakTemp, b: b.cpuPeakTemp, unit: "°C")
                             compareMetric("GPU Peak Temp", a: a.gpuPeakTemp, b: b.gpuPeakTemp, unit: "°C")
                             compareMetric("CPU Peak Power", a: a.cpuPeakPower, b: b.cpuPeakPower, unit: "W")
+                            compareMetric("GPU Peak Power", a: a.gpuPeakPower, b: b.gpuPeakPower, unit: "W")
                             compareRow("P-Cluster Peak",
                                        a: pFreqStr(a.pClusterPeakFreq ?? (a.pClusterMinFreq > 0 ? a.pClusterMinFreq : nil)),
                                        b: pFreqStr(b.pClusterPeakFreq ?? (b.pClusterMinFreq > 0 ? b.pClusterMinFreq : nil)))
@@ -703,18 +776,24 @@ struct CompareView: View {
                 }
 
                 // Overlay Charts — only when comparable
-                if result.canCompare, !sa.isEmpty || !sb.isEmpty {
-                    GroupBox("Temperature (°C)") {
-                        compareTempChart(a: sa, b: sb)
-                    }
-                    GroupBox("Power (W)") {
-                        comparePowerChart(a: sa, b: sb)
-                    }
-                    GroupBox("Frequency (GHz)") {
-                        compareFreqChart(a: sa, b: sb)
-                    }
-                    GroupBox("CPU Utilization") {
-                        compareUtilChart(a: sa, b: sb)
+                if result.canCompare {
+                    if loading {
+                        ProgressView("Loading samples…")
+                            .frame(maxWidth: .infinity, minHeight: 160)
+                            .padding(.vertical, 24)
+                    } else if !sa.isEmpty || !sb.isEmpty {
+                        GroupBox("Temperature (°C)") {
+                            compareTempChart(a: sa, b: sb)
+                        }
+                        GroupBox("Power (W)") {
+                            comparePowerChart(a: sa, b: sb)
+                        }
+                        GroupBox("Frequency (GHz)") {
+                            compareFreqChart(a: sa, b: sb)
+                        }
+                        GroupBox("CPU Utilization") {
+                            compareUtilChart(a: sa, b: sb)
+                        }
                     }
                 }
             }
@@ -896,10 +975,6 @@ struct CompareView: View {
         guard d > 0 else { return "0s" }
         let m = Int(d) / 60; let s = Int(d) % 60
         return m > 0 ? "\(m)m \(s)s" : "\(s)s"
-    }
-
-    func decodeSamples(run: RunRecord) -> [TelemetrySample] {
-        SampleArchive.load(from: run)
     }
 }
 
