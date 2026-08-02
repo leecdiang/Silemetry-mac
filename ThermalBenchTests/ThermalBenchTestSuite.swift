@@ -3,6 +3,16 @@
 // The suite can be driven by the standalone runner (ThermalBenchTestMain)
 // or by an XCTest wrapper (see Package.swift test target).
 import Foundation
+import SwiftData
+
+/// In-memory SwiftData container required by @Model inits (RunRecord) on
+/// macOS 14.x runtimes — they fatal-error without an active container, while
+/// newer runtimes tolerate detached models. Kept alive for the process so the
+/// suite behaves identically everywhere.
+let testModelContainer: ModelContainer? = try? ModelContainer(
+    for: RunRecord.self,
+    configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+)
 
 // ThermalBenchTests — minimal test runner (no XCTest dependency).
 // Compiles alongside main sources; shares the same module namespace.
