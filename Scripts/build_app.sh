@@ -15,6 +15,10 @@ echo "Project: $PROJECT_DIR"
 echo "SDK: $SDK_PATH"
 echo ""
 
+# Fresh checkouts have no build/dist dirs — create them before anything
+# tries to write (the Rust lib copy below is the first writer).
+mkdir -p "$BUILD_DIR" "$DIST_DIR"
+
 # ─── 1. Rust TelemetryCore (macmon-based) ───────────────────────────────
 NEW_TELEMETRY_LIB="$PROJECT_DIR/TelemetryCore/target/aarch64-apple-darwin/release/libthermalbench_telemetry_core.a"
 BUILT_TELEMETRY_LIB="$BUILD_DIR/libthermalbench_telemetry_core.a"
