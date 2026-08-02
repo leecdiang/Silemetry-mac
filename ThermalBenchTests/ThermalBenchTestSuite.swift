@@ -5,15 +5,6 @@
 import Foundation
 import SwiftData
 
-/// In-memory SwiftData container required by @Model inits (RunRecord) on
-/// macOS 14.x runtimes — they fatal-error without an active container, while
-/// newer runtimes tolerate detached models. Kept alive for the process so the
-/// suite behaves identically everywhere.
-let testModelContainer: ModelContainer? = try? ModelContainer(
-    for: RunRecord.self,
-    configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-)
-
 // ThermalBenchTests — minimal test runner (no XCTest dependency).
 // Compiles alongside main sources; shares the same module namespace.
 // Exit code 0 = pass, 1 = fail.
@@ -133,6 +124,17 @@ extension RunRecord {
 // MARK: - Test Suites
 
 func runAllTests() -> (total: Int, passed: Int, failed: Int) {
+    // @Model inits (RunRecord) fatal-error on macOS 14.x runtimes without an
+    // active ModelContainer; newer runtimes tolerate detached models. Create
+    // one in-memory container BEFORE any test constructs a model. A function-
+    // local let is initialized eagerly (unlike a lazy top-level global) and
+    // stays alive for the whole suite. This entry is shared by the standalone
+    // runner and any future XCTest wrapper.
+    let testModelContainer: ModelContainer? = try? ModelContainer(
+        for: RunRecord.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    _ = testModelContainer
 
     // ── RunAnalyzer: hottest field ──────────────────────────────────────
     test("RunAnalyzer uses cpuTempHottest for peak") {
