@@ -2,6 +2,10 @@
 import SwiftUI
 import SwiftData
 
+/// @MainActor: reads @MainActor AppModel state from computed properties and
+/// closures outside body — required on Xcode 15.x where View is not yet
+/// globally @MainActor.
+@MainActor
 struct HomeView: View {
     @Environment(AppModel.self) private var app
     @State private var showConfirm = false

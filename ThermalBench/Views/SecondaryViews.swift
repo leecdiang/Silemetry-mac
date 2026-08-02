@@ -5,6 +5,10 @@ import Charts
 
 // MARK: - Results View
 
+/// @MainActor: reads @MainActor AppModel state (routing) from instance
+/// methods outside body — required on Xcode 15.x where View is not yet
+/// globally @MainActor.
+@MainActor
 struct ResultsView: View {
     let run: RunRecord
     @Environment(AppModel.self) private var app
@@ -398,6 +402,10 @@ struct ResultsView: View {
 
 // MARK: - History View
 
+/// @MainActor: mutates @MainActor AppModel.route from methods like
+/// deleteRun() — required on Xcode 15.x where View is not yet globally
+/// @MainActor.
+@MainActor
 struct HistoryView: View {
     @Query(sort: \RunRecord.createdAt, order: .reverse) var runs: [RunRecord]
     @Environment(AppModel.self) private var app

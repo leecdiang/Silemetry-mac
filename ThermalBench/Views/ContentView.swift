@@ -2,6 +2,10 @@
 import SwiftUI
 import SwiftData
 
+/// @MainActor: binds @MainActor AppModel state (sidebar selection, route)
+/// from computed properties outside body — required on Xcode 15.x where View
+/// is not yet globally @MainActor.
+@MainActor
 struct ContentView: View {
     @State private var appModel = AppModel()
     @Environment(\.modelContext) private var modelContext
