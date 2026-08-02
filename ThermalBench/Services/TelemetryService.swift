@@ -31,7 +31,10 @@ struct TelemetrySample: Identifiable, Codable {
     var pClusterFreqMHz: Double?
     var eClusterFreqMHz: Double?
     var batteryPercent: Int?
-    var acConnected: Bool = false
+    /// Power source. true = AC, false = battery, nil = unknown (desktop Mac
+    /// without a battery, or the battery API failed). Never defaulted to
+    /// false — a run must not be mislabeled as battery-powered.
+    var acConnected: Bool?
     var lowPowerMode: Bool = false
     var thermalState: ThermalStateTag = .unknown
     var cpuUtilization: Double?

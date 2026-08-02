@@ -752,6 +752,136 @@ func runAllTests() {
         try assertEqual(run.sampleSpan, 0)
     }
 
+    // ── TelemetrySample power source (nil = unknown, not Battery) ──────
+    test("TelemetrySample acConnected defaults to unknown") {
+        let s = TelemetrySample()
+        try assertNil(s.acConnected)
+        var t = TelemetrySample()
+        t.acConnected = true
+        try assertEqual(t.acConnected, true)
+        var u = TelemetrySample()
+        u.acConnected = false
+        try assertEqual(u.acConnected, false)
+    }
+
+    test("TelemetrySample acConnected codable round-trip preserves unknown") {
+        let s = TelemetrySample()
+        let data = try JSONEncoder().encode(s)
+        let decoded = try JSONDecoder().decode(TelemetrySample.self, from: data)
+        try assertNil(decoded.acConnected)
+    }
+
+    // ── Archive diagnostics: corrupted/truncated files degrade status ──
+    test("ArchiveLoadResult: healthy file keeps complete") {
+        let uuid = "archgood-\(UUID().uuidString)"
+        var samples: [TelemetrySample] = []
+        for i in 0..<4 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = Double(i)
+            s.cpuTempHottest = Double(i)
+            samples.append(s)
+        }
+        try SampleArchive.append(samples, uuid: uuid)
+        let run = RunRecord(config: TestConfiguration())
+        run.dataDirectory = SampleArchive.samplesFile(for: uuid).path
+        run.sampleCount = 4
+        let result = SampleArchive.loadDetailed(dataDirectory: run.dataDirectory)
+        try assertEqual(result.totalLines, 4)
+        try assertEqual(result.malformedLines, 0)
+        try assertEqual(result.samples.count, 4)
+        try assertEqual(result.effectiveRawStatus(stored: .complete, expectedSamples: 4), .complete)
+        SampleArchive.deleteFiles(uuid: uuid)
+    }
+
+    test("ArchiveLoadResult: malformed lines degrade complete to partial") {
+        let uuid = "archbad-\(UUID().uuidString)"
+        let dir = SampleArchive.directory(for: uuid)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var good = TelemetrySample()
+        good.cpuTempHottest = 50
+        let goodData = try JSONEncoder().encode(good)
+        var text = String(data: goodData, encoding: .utf8)! + "\n"
+        text += "{not valid json}\n"
+        try text.write(to: SampleArchive.samplesFile(for: uuid), atomically: true, encoding: .utf8)
+
+        let result = SampleArchive.loadDetailed(dataDirectory: SampleArchive.samplesFile(for: uuid).path)
+        try assertEqual(result.totalLines, 2)
+        try assertEqual(result.malformedLines, 1)
+        try assertEqual(result.samples.count, 1)
+        try assertEqual(result.effectiveRawStatus(stored: .complete, expectedSamples: 1), .partial)
+        // Already-partial stays partial; never upgraded.
+        try assertEqual(result.effectiveRawStatus(stored: .partial, expectedSamples: 1), .partial)
+        SampleArchive.deleteFiles(uuid: uuid)
+    }
+
+    test("ArchiveLoadResult: truncated archive degrades to partial") {
+        let uuid = "archtrunc-\(UUID().uuidString)"
+        var samples: [TelemetrySample] = []
+        for i in 0..<3 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = Double(i)
+            s.cpuTempHottest = Double(i)
+            samples.append(s)
+        }
+        try SampleArchive.append(samples, uuid: uuid)
+        let path = SampleArchive.samplesFile(for: uuid).path
+        // Summary claims 5 samples, file only has 3.
+        let result = SampleArchive.loadDetailed(dataDirectory: path)
+        try assertEqual(result.totalLines, 3)
+        try assertEqual(result.effectiveRawStatus(stored: .complete, expectedSamples: 5), .partial)
+        SampleArchive.deleteFiles(uuid: uuid)
+    }
+
+    test("ArchiveLoadResult: missing file degrades to partial") {
+        let uuid = "archmiss-\(UUID().uuidString)"
+        let path = SampleArchive.samplesFile(for: uuid).path
+        let result = SampleArchive.loadDetailed(dataDirectory: path)
+        try assertFalse(result.fileExists)
+        try assertTrue(result.isFileBacked)
+        try assertEqual(result.effectiveRawStatus(stored: .complete, expectedSamples: 10), .partial)
+    }
+
+    test("ArchiveLoadResult: legacy inline JSON not cross-checked") {
+        var samples: [TelemetrySample] = []
+        var s = TelemetrySample()
+        s.cpuTempHottest = 61.5
+        samples.append(s)
+        let data = try JSONEncoder().encode(samples)
+        let result = SampleArchive.loadDetailed(dataDirectory: String(data: data, encoding: .utf8)!)
+        try assertFalse(result.isFileBacked)
+        try assertEqual(result.samples.count, 1)
+        try assertEqual(result.effectiveRawStatus(stored: .complete, expectedSamples: 1), .complete)
+    }
+
+    // ── Delete transaction staging ─────────────────────────────────────
+    test("stageFiles/purge removes files, restore brings them back") {
+        let uuid = "stage-\(UUID().uuidString)"
+        var s = TelemetrySample()
+        s.cpuTempHottest = 42
+        try SampleArchive.append([s], uuid: uuid)
+        let run = RunRecord(config: TestConfiguration())
+        run.uuid = uuid
+        run.dataDirectory = SampleArchive.samplesFile(for: uuid).path
+
+        // Stage → files leave the run directory
+        let staged = SampleArchive.stageFiles(for: run)
+        try assertNotNil(staged)
+        try assertFalse(FileManager.default.fileExists(atPath: SampleArchive.directory(for: uuid).path))
+
+        // Purge → staged data gone permanently
+        SampleArchive.purgeStaged(staged)
+        try assertFalse(FileManager.default.fileExists(atPath: staged!.path))
+
+        // Stage again → restore puts the files back at the canonical path
+        try SampleArchive.append([s], uuid: uuid)
+        let staged2 = SampleArchive.stageFiles(for: run)
+        try assertNotNil(staged2)
+        SampleArchive.restoreStaged(staged2)
+        try assertTrue(FileManager.default.fileExists(atPath: SampleArchive.directory(for: uuid).path))
+        try assertTrue(FileManager.default.fileExists(atPath: SampleArchive.samplesFile(for: uuid).path))
+        SampleArchive.deleteFiles(uuid: uuid)
+    }
+
     // ── Report ──────────────────────────────────────────────────────────
     print("")
     print("=== Results: \(passed)/\(total) passed, \(failed) failed ===")

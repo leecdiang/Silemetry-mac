@@ -382,10 +382,26 @@ struct TestView: View {
     }
 
     private func discardPending() {
-        if let run = pendingRun {
-            SampleArchive.deleteFiles(for: run)
-            pendingRun = nil
+        guard let run = pendingRun else {
+            showSaveFailure = false
+            goHome()
+            return
         }
+        // Remove the unsaved record from the shared context — otherwise a
+        // later save() elsewhere could persist it after its JSONL is already
+        // gone, producing a record whose raw file no longer exists.
+        modelContext.delete(run)
+        SampleArchive.deleteFiles(for: run)
+        do {
+            try modelContext.save()
+        } catch {
+            print("[PERSIST] discard cleanup error: \(error)")
+            exportConfirmation = "Discard cleanup failed: \(error.localizedDescription)"
+            // Stay on the sheet — the record may still exist; do not pretend
+            // the discard succeeded.
+            return
+        }
+        pendingRun = nil
         showSaveFailure = false
         goHome()
     }

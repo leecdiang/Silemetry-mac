@@ -12,6 +12,9 @@ struct ResultsView: View {
     /// Samples loaded once in the background; avoids re-reading the whole
     /// JSONL file on every computed-property access (main thread).
     @State private var cachedSamples: [TelemetrySample]?
+    /// File diagnostics from the background load — lets the UI cross-check
+    /// the stored status against what is actually on disk.
+    @State private var archiveLoad: SampleArchive.ArchiveLoadResult?
 
     enum ResultSection: String, CaseIterable, Identifiable {
         case summary = "Summary"
@@ -43,6 +46,10 @@ struct ResultsView: View {
                 if run.sampleCount < 50 && run.sampleCount > 0 {
                     Text("Short test · steady state not established · peaks remain valid")
                         .font(.caption2).foregroundStyle(.blue)
+                }
+                if effectiveRawStatus != .complete {
+                    Text("Raw data incomplete · curve may be truncated")
+                        .font(.caption2).foregroundStyle(.orange)
                 }
             }
             .padding(.horizontal, 16).padding(.top, 8)
@@ -93,10 +100,21 @@ struct ResultsView: View {
             // never the SwiftData model object itself.
             let path = run.dataDirectory
             Task.detached(priority: .userInitiated) {
-                let loaded = SampleArchive.load(dataDirectory: path)
-                await MainActor.run { cachedSamples = loaded }
+                let result = SampleArchive.loadDetailed(dataDirectory: path)
+                await MainActor.run {
+                    archiveLoad = result
+                    cachedSamples = result.samples
+                }
             }
         }
+    }
+
+    /// Stored raw-data status cross-checked against the file on disk: a
+    /// stored "complete" degrades to partial when the archive is missing,
+    /// truncated, or has malformed lines.
+    private var effectiveRawStatus: RawDataStatus {
+        archiveLoad?.effectiveRawStatus(stored: run.rawDataStatus, expectedSamples: run.sampleCount)
+            ?? run.rawDataStatus
     }
 
     // MARK: - Summary
@@ -320,11 +338,23 @@ struct ResultsView: View {
                 LabeledContent("Coverage", value: String(format: "%.0f%%", run.dataCoverage * 100))
                 LabeledContent("Completion", value: run.wasInterrupted ? "Interrupted" : "Completed")
                 LabeledContent("Samples stored", value: storedSamples.isEmpty ? "No" : "Yes (\(storedSamples.count))")
-                LabeledContent("Raw archive", value: rawDataStatus.displayName)
-                if rawDataStatus != .complete {
+                LabeledContent("Raw archive", value: effectiveRawStatus.displayName)
+                if effectiveRawStatus != .complete {
                     Label("Raw sample data is incomplete — the Summary may include samples missing from the raw curve.",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange)
+                }
+                if run.rawDataStatus == .complete && effectiveRawStatus == .partial {
+                    Label("Archive on disk disagrees with the stored summary (missing, truncated, or corrupt) — treated as Partial.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if let load = archiveLoad, load.isFileBacked {
+                    LabeledContent("Archive lines", value: "\(load.totalLines)")
+                    if load.malformedLines > 0 {
+                        LabeledContent("Malformed lines", value: "\(load.malformedLines)")
+                    }
+                    LabeledContent("Archive file", value: load.fileExists ? "Found" : "Missing")
                 }
                 if let rawErr = run.rawDataError {
                     Text(rawErr).font(.caption2).foregroundStyle(.secondary)
@@ -340,10 +370,6 @@ struct ResultsView: View {
             }.padding(.horizontal)
         }
         .padding(.vertical, 12)
-    }
-
-    private var rawDataStatus: RawDataStatus {
-        RawDataStatus(rawValue: run.rawDataStatusRaw) ?? .complete
     }
 
     /// "<valid>/<total>" per-channel sample coverage for the Quality page.
@@ -382,6 +408,8 @@ struct HistoryView: View {
     @State private var isSelecting = false
     @State private var selectedRuns = Set<RunRecord.ID>()
     @State private var confirmDeleteSelected = false
+    @State private var deleteError: String?
+    @State private var renameError: String?
 
     var body: some View {
         Group {
@@ -488,6 +516,22 @@ struct HistoryView: View {
                 Text("Enter a new name for \(r.name)")
             }
         }
+        .alert("Delete Failed", isPresented: .init(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK") { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "Unknown error")
+        }
+        .alert("Rename Failed", isPresented: .init(
+            get: { renameError != nil },
+            set: { if !$0 { renameError = nil } }
+        )) {
+            Button("OK") { renameError = nil }
+        } message: {
+            Text(renameError ?? "Unknown error")
+        }
         .navigationTitle("History")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -526,28 +570,52 @@ struct HistoryView: View {
             return
         }
         run.name = trimmed
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            // Don't swallow it — the name would revert after restart and the
+            // user would have no idea why.
+            print("[HISTORY] rename save error: \(error)")
+            renameError = "Could not save the new name: \(error.localizedDescription)"
+        }
         renameRun = nil
     }
 
     private func deleteSelectedRuns() {
         let targets = runs.filter { selectedRuns.contains($0.id) }
+        // Stage every run's sample directory first. The files only get
+        // permanently removed after the SwiftData deletion saves; on failure
+        // they are restored so DB and files never diverge.
+        let staged = targets.map { SampleArchive.stageFiles(for: $0) }
         for run in targets {
-            // Remove sample files first (dataDirectory still holds the path),
-            // then delete the record. Never clear dataDirectory before cleanup.
-            SampleArchive.deleteFiles(for: run)
             modelContext.delete(run)
         }
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            staged.forEach { SampleArchive.purgeStaged($0) }
+        } catch {
+            print("[HISTORY] batch delete save error: \(error)")
+            staged.forEach { SampleArchive.restoreStaged($0) }
+            deleteError = "Could not delete \(targets.count) test(s): \(error.localizedDescription)"
+        }
         withAnimation { isSelecting = false }
         selectedRuns.removeAll()
     }
 
     private func deleteRun(_ run: RunRecord) {
-        // Remove sample files first, then delete the record.
-        SampleArchive.deleteFiles(for: run)
+        // Stage the sample files, delete the record, save. Purge the staged
+        // files only on success; restore them if the save fails so the record
+        // never points at a missing archive.
+        let staged = SampleArchive.stageFiles(for: run)
         modelContext.delete(run)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            SampleArchive.purgeStaged(staged)
+        } catch {
+            print("[HISTORY] delete save error: \(error)")
+            SampleArchive.restoreStaged(staged)
+            deleteError = "Could not delete \(run.name): \(error.localizedDescription)"
+        }
 
         // If currently viewing this run in Results, go home
         if case .result(let id) = app.route, id == run.uuid {
@@ -569,6 +637,10 @@ struct CompareView: View {
     // to decode synchronously in body on every redraw).
     @State private var samplesA: [TelemetrySample]?
     @State private var samplesB: [TelemetrySample]?
+    /// File diagnostics per run — used to cross-check the stored raw-data
+    /// status against the file actually on disk.
+    @State private var diagA: SampleArchive.ArchiveLoadResult?
+    @State private var diagB: SampleArchive.ArchiveLoadResult?
     @State private var loadingComparison = false
 
     /// Only valid runs with data
@@ -634,6 +706,8 @@ struct CompareView: View {
         guard let a = runA, let b = runB, a.uuid != b.uuid else {
             samplesA = nil
             samplesB = nil
+            diagA = nil
+            diagB = nil
             loadingComparison = false
             return
         }
@@ -641,6 +715,8 @@ struct CompareView: View {
         guard result.canCompare else {
             samplesA = []
             samplesB = []
+            diagA = nil
+            diagB = nil
             loadingComparison = false
             return
         }
@@ -650,12 +726,14 @@ struct CompareView: View {
         let pathB = b.dataDirectory
         loadingComparison = true
         Task.detached(priority: .userInitiated) {
-            let sa = SampleArchive.load(dataDirectory: pathA)
-            let sb = SampleArchive.load(dataDirectory: pathB)
+            let ra = SampleArchive.loadDetailed(dataDirectory: pathA)
+            let rb = SampleArchive.loadDetailed(dataDirectory: pathB)
             await MainActor.run {
                 guard idA == self.firstID, idB == self.secondID else { return }
-                self.samplesA = sa
-                self.samplesB = sb
+                self.diagA = ra
+                self.diagB = rb
+                self.samplesA = ra.samples
+                self.samplesB = rb.samples
                 self.loadingComparison = false
             }
         }
@@ -685,11 +763,13 @@ struct CompareView: View {
     @ViewBuilder
     func compareContent(a: RunRecord, b: RunRecord) -> some View {
         let result = CompareAnalyzer.analyze(a: a, b: b)
-        // Raw-curve availability per run: partial runs keep summary
-        // comparability but flag their curve; unavailable runs are summary-
-        // only and never draw a curve.
-        let rawA = a.rawDataStatus
-        let rawB = b.rawDataStatus
+        // Raw-curve availability per run, cross-checked against the file on
+        // disk: partial runs keep summary comparability but flag their curve;
+        // unavailable runs are summary-only and never draw a curve.
+        let rawA = diagA?.effectiveRawStatus(stored: a.rawDataStatus, expectedSamples: a.sampleCount)
+            ?? a.rawDataStatus
+        let rawB = diagB?.effectiveRawStatus(stored: b.rawDataStatus, expectedSamples: b.sampleCount)
+            ?? b.rawDataStatus
         let sa = result.canCompare && rawA != .unavailable ? (samplesA ?? []) : []
         let sb = result.canCompare && rawB != .unavailable ? (samplesB ?? []) : []
         let loading = loadingComparison && result.canCompare

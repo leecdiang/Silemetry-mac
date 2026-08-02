@@ -13,10 +13,44 @@ enum SampleArchive {
     /// Flush buffer size — kept small so disk writes stay cheap and bounded.
     static let batchSize = 500
 
+    /// Diagnostics for an archive load — lets callers cross-check the file on
+    /// disk against the stored summary instead of trusting the stored status.
+    struct ArchiveLoadResult {
+        let samples: [TelemetrySample]
+        let totalLines: Int
+        let malformedLines: Int
+        let fileExists: Bool
+        /// True when the run is file-backed (new format) rather than inline JSON.
+        let isFileBacked: Bool
+
+        /// Runtime-effective raw-data status: a stored "complete" is downgraded
+        /// to partial when the file disagrees (missing, truncated, or malformed
+        /// lines). Legacy inline runs cannot be cross-checked.
+        func effectiveRawStatus(stored: RawDataStatus, expectedSamples: Int) -> RawDataStatus {
+            guard isFileBacked else { return stored }
+            guard stored == .complete else { return stored }
+            if !fileExists || malformedLines > 0 || totalLines < expectedSamples {
+                return .partial
+            }
+            return .complete
+        }
+    }
+
     static var runsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let dir = base.appendingPathComponent("Silemetry/Runs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Staging area for delete transactions: sample directories are moved here
+    /// before the SwiftData record is deleted, then purged on success or
+    /// restored on failure so DB and files never diverge permanently.
+    static var trashDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Silemetry/Trash", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -62,34 +96,128 @@ enum SampleArchive {
     /// runs, inline JSON for legacy runs). String-only so it can be called
     /// from background tasks without touching SwiftData objects.
     static func load(dataDirectory path: String) -> [TelemetrySample] {
-        guard !path.isEmpty else { return [] }
+        loadDetailed(dataDirectory: path).samples
+    }
 
-        // New format: absolute path to samples.jsonl
+    /// Load samples plus file diagnostics (line counts, existence).
+    static func loadDetailed(dataDirectory path: String) -> ArchiveLoadResult {
+        guard !path.isEmpty else {
+            return ArchiveLoadResult(samples: [], totalLines: 0, malformedLines: 0,
+                                     fileExists: false, isFileBacked: false)
+        }
+
+        // New format: absolute path to samples.jsonl — stream-decode it so a
+        // corrupted line never silently drops data without being counted.
         if path.hasPrefix("/") {
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
-                let decoded = decodeJSONL(data)
-                if !decoded.isEmpty { return decoded }
+            let file = URL(fileURLWithPath: path)
+            let exists = FileManager.default.fileExists(atPath: path)
+            if exists {
+                let (samples, total, malformed) = decodeJSONLStreaming(file)
+                return ArchiveLoadResult(samples: samples, totalLines: total, malformedLines: malformed,
+                                         fileExists: true, isFileBacked: true)
             }
+            return ArchiveLoadResult(samples: [], totalLines: 0, malformedLines: 0,
+                                     fileExists: false, isFileBacked: true)
         }
 
         // Legacy format: inline JSON array
         guard let json = path.data(using: .utf8),
               let samples = try? decoder.decode([TelemetrySample].self, from: json) else {
-            return []
+            return ArchiveLoadResult(samples: [], totalLines: 0, malformedLines: 0,
+                                     fileExists: false, isFileBacked: false)
         }
-        return samples
+        return ArchiveLoadResult(samples: samples, totalLines: samples.count, malformedLines: 0,
+                                 fileExists: false, isFileBacked: false)
     }
 
-    static func decodeJSONL(_ data: Data) -> [TelemetrySample] {
-        guard let text = String(data: data, encoding: .utf8) else { return [] }
+    /// Stream-decode a JSONL file line by line (64 KB chunks). The whole file
+    /// is never materialized as one String, so peak memory stays around one
+    /// line plus the decoded array — important when Compare holds two long
+    /// runs at once. Returns decoded samples plus line diagnostics.
+    static func decodeJSONLStreaming(_ file: URL) -> (samples: [TelemetrySample], totalLines: Int, malformedLines: Int) {
+        guard let handle = try? FileHandle(forReadingFrom: file) else {
+            return ([], 0, 0)
+        }
+        defer { try? handle.close() }
+
+        var buffer = Data()
         var out: [TelemetrySample] = []
-        out.reserveCapacity(text.count / 200)
-        for line in text.split(separator: "\n") {
-            if let s = try? decoder.decode(TelemetrySample.self, from: Data(line.utf8)) {
-                out.append(s)
+        var total = 0, malformed = 0
+        let newline = UInt8(ascii: "\n")
+
+        while let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            buffer.append(chunk)
+            var start = buffer.startIndex
+            while let nl = buffer[start...].firstIndex(of: newline) {
+                let line = buffer[start..<nl]
+                if !line.isEmpty {
+                    total += 1
+                    autoreleasepool {
+                        if let s = try? decoder.decode(TelemetrySample.self, from: line) {
+                            out.append(s)
+                        } else {
+                            malformed += 1
+                        }
+                    }
+                }
+                start = buffer.index(after: nl)
+            }
+            if start < buffer.endIndex {
+                buffer = Data(buffer[start...])
+            } else {
+                buffer.removeAll(keepingCapacity: true)
             }
         }
-        return out
+        // Tail line without a trailing newline
+        if !buffer.isEmpty {
+            total += 1
+            autoreleasepool {
+                if let s = try? decoder.decode(TelemetrySample.self, from: buffer) {
+                    out.append(s)
+                } else {
+                    malformed += 1
+                }
+            }
+        }
+        return (out, total, malformed)
+    }
+
+    /// Move a run's sample directory into the staging (trash) area. Returns
+    /// the staged location, or nil when the run had no file-backed samples.
+    /// The caller either purges it after a successful record deletion or
+    /// restores it when the deletion fails — files and DB stay in sync.
+    static func stageFiles(for run: RunRecord) -> URL? {
+        let dir = directory(for: run.uuid)
+        guard FileManager.default.fileExists(atPath: dir.path) else { return nil }
+        let staged = trashDirectory.appendingPathComponent(run.uuid, isDirectory: true)
+        // Clear a stale leftover from a crashed delete transaction.
+        try? FileManager.default.removeItem(at: staged)
+        do {
+            try FileManager.default.moveItem(at: dir, to: staged)
+            return staged
+        } catch {
+            print("[SampleArchive] stage failed: \(error)")
+            return nil
+        }
+    }
+
+    /// Permanently remove a staged directory after a successful deletion.
+    static func purgeStaged(_ staged: URL?) {
+        guard let staged else { return }
+        try? FileManager.default.removeItem(at: staged)
+    }
+
+    /// Move a staged directory back to its canonical run location after a
+    /// failed deletion — the record still exists, so its files must too.
+    static func restoreStaged(_ staged: URL?) {
+        guard let staged else { return }
+        let dest = directory(for: staged.lastPathComponent)
+        try? FileManager.default.removeItem(at: dest)
+        do {
+            try FileManager.default.moveItem(at: staged, to: dest)
+        } catch {
+            print("[SampleArchive] restore failed: \(error)")
+        }
     }
 
     /// Remove a run's sample files (safe no-op for legacy inline storage).
