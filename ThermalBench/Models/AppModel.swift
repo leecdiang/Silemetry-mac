@@ -10,7 +10,10 @@ final class AppModel {
     }
     var route: Route = .home
 
-    var powerSource: PowerSource = .charging(batteryPercent: 100)
+    // Unknown until the first battery read lands — never a fabricated
+    // "100% charging" flash on machines without a battery or before the
+    // one-second power monitor fires.
+    var powerSource: PowerSource = .unavailable
     var lowPowerMode: Bool = false
     var thermalStateTag: ThermalStateTag = .nominal
 

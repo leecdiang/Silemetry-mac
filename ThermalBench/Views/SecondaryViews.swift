@@ -344,8 +344,8 @@ struct ResultsView: View {
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                if run.rawDataStatus == .complete && effectiveRawStatus == .partial {
-                    Label("Archive on disk disagrees with the stored summary (missing, truncated, or corrupt) — treated as Partial.",
+                if run.rawDataStatus == .complete && effectiveRawStatus != .complete {
+                    Label("Archive on disk disagrees with the stored summary (missing, truncated, or corrupt) — treated as \(effectiveRawStatus.displayName).",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange)
                 }
@@ -569,13 +569,17 @@ struct HistoryView: View {
             renameRun = nil
             return
         }
+        let oldName = run.name
         run.name = trimmed
         do {
             try modelContext.save()
         } catch {
             // Don't swallow it — the name would revert after restart and the
-            // user would have no idea why.
+            // user would have no idea why. Roll back so the pending rename
+            // cannot be flushed by a later save() elsewhere.
             print("[HISTORY] rename save error: \(error)")
+            modelContext.rollback()
+            run.name = oldName
             renameError = "Could not save the new name: \(error.localizedDescription)"
         }
         renameRun = nil
@@ -595,6 +599,9 @@ struct HistoryView: View {
             staged.forEach { SampleArchive.purgeStaged($0) }
         } catch {
             print("[HISTORY] batch delete save error: \(error)")
+            // Roll back the deletes so the records stay visible and consistent
+            // with the restored files.
+            modelContext.rollback()
             staged.forEach { SampleArchive.restoreStaged($0) }
             deleteError = "Could not delete \(targets.count) test(s): \(error.localizedDescription)"
         }
@@ -613,6 +620,7 @@ struct HistoryView: View {
             SampleArchive.purgeStaged(staged)
         } catch {
             print("[HISTORY] delete save error: \(error)")
+            modelContext.rollback()
             SampleArchive.restoreStaged(staged)
             deleteError = "Could not delete \(run.name): \(error.localizedDescription)"
         }
@@ -762,14 +770,18 @@ struct CompareView: View {
 
     @ViewBuilder
     func compareContent(a: RunRecord, b: RunRecord) -> some View {
-        let result = CompareAnalyzer.analyze(a: a, b: b)
         // Raw-curve availability per run, cross-checked against the file on
         // disk: partial runs keep summary comparability but flag their curve;
-        // unavailable runs are summary-only and never draw a curve.
-        let rawA = diagA?.effectiveRawStatus(stored: a.rawDataStatus, expectedSamples: a.sampleCount)
+        // unavailable runs are summary-only and never draw a curve. The
+        // effective statuses feed the analyzer too, so the verdict, the
+        // details table and the curve banner can never contradict each other.
+        let effA = diagA?.effectiveRawStatus(stored: a.rawDataStatus, expectedSamples: a.sampleCount)
             ?? a.rawDataStatus
-        let rawB = diagB?.effectiveRawStatus(stored: b.rawDataStatus, expectedSamples: b.sampleCount)
+        let effB = diagB?.effectiveRawStatus(stored: b.rawDataStatus, expectedSamples: b.sampleCount)
             ?? b.rawDataStatus
+        let result = CompareAnalyzer.analyze(a: a, b: b, effectiveRawA: effA, effectiveRawB: effB)
+        let rawA = effA
+        let rawB = effB
         let sa = result.canCompare && rawA != .unavailable ? (samplesA ?? []) : []
         let sb = result.canCompare && rawB != .unavailable ? (samplesB ?? []) : []
         let loading = loadingComparison && result.canCompare

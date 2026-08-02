@@ -165,6 +165,17 @@ final class RunRecord {
     var acConnected: Bool?
     var batteryPercent: Int?
 
+    // ── Power-source / low-power snapshot (start vs end, change detection) ──
+    // nil = unknown (desktop Mac or battery API unavailable). A run that
+    // switched AC↔battery or low-power mid-test must not be presented as one
+    // uniform condition.
+    var powerSourceAtStart: Bool?
+    var powerSourceAtEnd: Bool?
+    var powerSourceChanged: Bool = false
+    var lowPowerModeAtStart: Bool?
+    var lowPowerModeAtEnd: Bool?
+    var lowPowerModeChanged: Bool = false
+
     // ── Extended snapshot (analysis provenance / environment) ──
     var lowPowerMode: Bool?
     var ambientTemperature: Double?

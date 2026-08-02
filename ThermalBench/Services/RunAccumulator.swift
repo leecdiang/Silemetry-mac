@@ -9,6 +9,7 @@ struct RunAccumulator {
     private(set) var validSampleCount = 0
     private(set) var firstElapsed: TimeInterval?
     private(set) var lastElapsed: TimeInterval?
+    private(set) var firstSample: TelemetrySample?
     private(set) var lastSample: TelemetrySample?
 
     // Temperature (per channel, optional-aware)
@@ -46,7 +47,10 @@ struct RunAccumulator {
         if s.cpuTemp != nil || s.gpuTemp != nil || s.cpuPower != nil || s.gpuPower != nil || s.pClusterFreqMHz != nil || s.eClusterFreqMHz != nil {
             validSampleCount += 1
         }
-        if firstElapsed == nil { firstElapsed = s.elapsedSeconds }
+        if firstElapsed == nil {
+            firstElapsed = s.elapsedSeconds
+            firstSample = s
+        }
         lastElapsed = s.elapsedSeconds
         lastSample = s
 

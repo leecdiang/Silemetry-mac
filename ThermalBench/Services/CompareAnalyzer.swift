@@ -67,9 +67,17 @@ enum CompareAnalyzer {
     /// Current analysis version — bump when check logic changes.
     static let analysisVersion = 3
 
-    static func analyze(a: RunRecord, b: RunRecord) -> ComparabilityResult {
+    static func analyze(a: RunRecord, b: RunRecord,
+                        effectiveRawA: RawDataStatus? = nil,
+                        effectiveRawB: RawDataStatus? = nil) -> ComparabilityResult {
         var warnings: [ComparabilityWarning] = []
         var fields: [ComparabilityField] = []
+
+        // Raw archive integrity — prefer the runtime cross-checked status
+        // (file on disk) when the caller has loaded it; otherwise fall back to
+        // the stored value. Keeps the verdict and the curve banner consistent.
+        let rawA = effectiveRawA ?? a.rawDataStatus
+        let rawB = effectiveRawB ?? b.rawDataStatus
 
         // ── Hard blockers (invalid comparison) ────────────────────────────
 
@@ -161,15 +169,11 @@ enum CompareAnalyzer {
                                         tolerance: 0.05, severity: .warning,
                                         warnings: &warnings))
 
-        fields.append(checkPowerSource(a: a.acConnected, b: b.acConnected,
-                                       aBattery: a.batteryPercent, bBattery: b.batteryPercent,
-                                       warnings: &warnings))
+        fields.append(checkPowerSource(a: a, b: b, warnings: &warnings))
 
         // ── Extended environment / provenance ───────────────────────────
 
-        fields.append(checkOptionalBoolField(id: "powerMode", label: "Low Power Mode",
-                                             a: a.lowPowerMode, b: b.lowPowerMode,
-                                             warnings: &warnings))
+        fields.append(checkLowPowerMode(a: a, b: b, warnings: &warnings))
 
         // Ambient temperature — nil = not recorded (never a fake 25°C)
         if let ta = a.ambientTemperature, let tb = b.ambientTemperature {
@@ -226,8 +230,6 @@ enum CompareAnalyzer {
 
         // ── Raw archive integrity (Summary vs raw curve consistency) ────
 
-        let rawA = a.rawDataStatus
-        let rawB = b.rawDataStatus
         let rawMatch = rawA == .complete && rawB == .complete
         fields.append(ComparabilityField(id: "rawData", label: "Raw Data",
                                          valueA: rawA.displayName,
@@ -337,6 +339,52 @@ enum CompareAnalyzer {
     }
 
     // MARK: - Helpers
+
+    /// Power source comparison with mid-run change detection. Uses the
+    /// start/end snapshots when available (a run that switched AC↔battery is
+    /// "changed", not silently uniform); falls back to the legacy single
+    /// snapshot for old records.
+    private static func checkPowerSource(a: RunRecord, b: RunRecord,
+                                         warnings: inout [ComparabilityWarning]) -> ComparabilityField {
+        if a.powerSourceChanged {
+            warnings.append(ComparabilityWarning(
+                id: "power_changed_a", field: "Power Source", severity: .warning,
+                detail: "Run A power source changed during the test (AC ↔ battery) — results mix both conditions"
+            ))
+        }
+        if b.powerSourceChanged {
+            warnings.append(ComparabilityWarning(
+                id: "power_changed_b", field: "Power Source", severity: .warning,
+                detail: "Run B power source changed during the test (AC ↔ battery) — results mix both conditions"
+            ))
+        }
+        let aVal = a.powerSourceAtEnd ?? a.powerSourceAtStart ?? a.acConnected
+        let bVal = b.powerSourceAtEnd ?? b.powerSourceAtStart ?? b.acConnected
+        return checkPowerSource(a: aVal, b: bVal,
+                                aBattery: a.batteryPercent, bBattery: b.batteryPercent,
+                                warnings: &warnings)
+    }
+
+    /// Low Power Mode comparison with mid-run change detection.
+    private static func checkLowPowerMode(a: RunRecord, b: RunRecord,
+                                          warnings: inout [ComparabilityWarning]) -> ComparabilityField {
+        if a.lowPowerModeChanged {
+            warnings.append(ComparabilityWarning(
+                id: "powerMode_changed_a", field: "Low Power Mode", severity: .warning,
+                detail: "Run A low power mode changed during the test — results mix both conditions"
+            ))
+        }
+        if b.lowPowerModeChanged {
+            warnings.append(ComparabilityWarning(
+                id: "powerMode_changed_b", field: "Low Power Mode", severity: .warning,
+                detail: "Run B low power mode changed during the test — results mix both conditions"
+            ))
+        }
+        let aVal = a.lowPowerModeAtEnd ?? a.lowPowerModeAtStart ?? a.lowPowerMode
+        let bVal = b.lowPowerModeAtEnd ?? b.lowPowerModeAtStart ?? b.lowPowerMode
+        return checkOptionalBoolField(id: "powerMode", label: "Low Power Mode",
+                                      a: aVal, b: bVal, warnings: &warnings)
+    }
 
     /// Workload-type comparison. The recorded workloadTypeRaw snapshot is the
     /// only trusted source — legacy runs without it are "unverified", never

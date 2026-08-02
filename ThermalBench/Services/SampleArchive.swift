@@ -20,18 +20,21 @@ enum SampleArchive {
         let totalLines: Int
         let malformedLines: Int
         let fileExists: Bool
+        /// Non-nil when the file could not be read (I/O error mid-stream).
+        let readError: String?
         /// True when the run is file-backed (new format) rather than inline JSON.
         let isFileBacked: Bool
 
         /// Runtime-effective raw-data status: a stored "complete" is downgraded
-        /// to partial when the file disagrees (missing, truncated, or malformed
-        /// lines). Legacy inline runs cannot be cross-checked.
+        /// when the file disagrees with the summary.
+        /// - missing / unreadable file → unavailable (nothing to draw)
+        /// - malformed, truncated, or duplicated lines → partial
+        /// - legacy inline runs cannot be cross-checked → stored status
         func effectiveRawStatus(stored: RawDataStatus, expectedSamples: Int) -> RawDataStatus {
             guard isFileBacked else { return stored }
             guard stored == .complete else { return stored }
-            if !fileExists || malformedLines > 0 || totalLines < expectedSamples {
-                return .partial
-            }
+            if !fileExists || readError != nil { return .unavailable }
+            if malformedLines > 0 || totalLines != expectedSamples { return .partial }
             return .complete
         }
     }
@@ -99,11 +102,11 @@ enum SampleArchive {
         loadDetailed(dataDirectory: path).samples
     }
 
-    /// Load samples plus file diagnostics (line counts, existence).
+    /// Load samples plus file diagnostics (line counts, existence, read errors).
     static func loadDetailed(dataDirectory path: String) -> ArchiveLoadResult {
         guard !path.isEmpty else {
             return ArchiveLoadResult(samples: [], totalLines: 0, malformedLines: 0,
-                                     fileExists: false, isFileBacked: false)
+                                     fileExists: false, readError: nil, isFileBacked: false)
         }
 
         // New format: absolute path to samples.jsonl — stream-decode it so a
@@ -112,40 +115,49 @@ enum SampleArchive {
             let file = URL(fileURLWithPath: path)
             let exists = FileManager.default.fileExists(atPath: path)
             if exists {
-                let (samples, total, malformed) = decodeJSONLStreaming(file)
+                let (samples, total, malformed, readError) = decodeJSONLStreaming(file)
                 return ArchiveLoadResult(samples: samples, totalLines: total, malformedLines: malformed,
-                                         fileExists: true, isFileBacked: true)
+                                         fileExists: true, readError: readError, isFileBacked: true)
             }
             return ArchiveLoadResult(samples: [], totalLines: 0, malformedLines: 0,
-                                     fileExists: false, isFileBacked: true)
+                                     fileExists: false, readError: nil, isFileBacked: true)
         }
 
         // Legacy format: inline JSON array
         guard let json = path.data(using: .utf8),
               let samples = try? decoder.decode([TelemetrySample].self, from: json) else {
             return ArchiveLoadResult(samples: [], totalLines: 0, malformedLines: 0,
-                                     fileExists: false, isFileBacked: false)
+                                     fileExists: false, readError: nil, isFileBacked: false)
         }
         return ArchiveLoadResult(samples: samples, totalLines: samples.count, malformedLines: 0,
-                                 fileExists: false, isFileBacked: false)
+                                 fileExists: false, readError: nil, isFileBacked: false)
     }
 
     /// Stream-decode a JSONL file line by line (64 KB chunks). The whole file
     /// is never materialized as one String, so peak memory stays around one
     /// line plus the decoded array — important when Compare holds two long
     /// runs at once. Returns decoded samples plus line diagnostics.
-    static func decodeJSONLStreaming(_ file: URL) -> (samples: [TelemetrySample], totalLines: Int, malformedLines: Int) {
+    static func decodeJSONLStreaming(_ file: URL) -> (samples: [TelemetrySample], totalLines: Int, malformedLines: Int, readError: String?) {
         guard let handle = try? FileHandle(forReadingFrom: file) else {
-            return ([], 0, 0)
+            return ([], 0, 0, "Could not open \(file.lastPathComponent)")
         }
         defer { try? handle.close() }
 
         var buffer = Data()
         var out: [TelemetrySample] = []
         var total = 0, malformed = 0
+        var readError: String?
         let newline = UInt8(ascii: "\n")
 
-        while let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+        while true {
+            let chunk: Data
+            do {
+                guard let c = try handle.read(upToCount: 64 * 1024), !c.isEmpty else { break }
+                chunk = c
+            } catch {
+                readError = "Read failed: \(error.localizedDescription)"
+                break
+            }
             buffer.append(chunk)
             var start = buffer.startIndex
             while let nl = buffer[start...].firstIndex(of: newline) {
@@ -179,7 +191,7 @@ enum SampleArchive {
                 }
             }
         }
-        return (out, total, malformed)
+        return (out, total, malformed, readError)
     }
 
     /// Move a run's sample directory into the staging (trash) area. Returns

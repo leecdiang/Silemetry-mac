@@ -57,7 +57,10 @@ impl TelemetrySampler {
                 };
 
                 running.store(true, Ordering::Release);
-                let mut seq: u64 = 0;
+                // Start at 1: the Swift side tracks lastSeq = 0 initially and
+                // wait_next only returns sequence_id > after_sequence_id, so a
+                // 0-based first sample would be skipped forever.
+                let mut seq: u64 = 1;
 
                 while !stop_flag.load(Ordering::Acquire) {
                     match sampler.get_metrics(interval_ms.max(100)) {
@@ -65,6 +68,33 @@ impl TelemetrySampler {
                             let now = SystemTime::now();
                             let unix_ns =
                                 now.duration_since(UNIX_EPOCH).unwrap().as_nanos() as i64;
+
+                            // Per-metric validity: only advertise channels that
+                            // are actually present and sane this sample. Swift
+                            // decides Optional fields from available_mask, so a
+                            // 0 / NaN / placeholder value must never be exposed
+                            // as real data.
+                            let mut mask: u64 = 0;
+                            let t = &metrics.temp;
+                            let sane_temp = |v: f32| v.is_finite() && v > -50.0 && v < 150.0;
+                            if t.cpu_sensor_count > 0 && sane_temp(t.cpu_temp_avg) { mask |= TB_AVAIL_CPU_TEMP; }
+                            if t.cpu_sensor_count > 0 && sane_temp(t.cpu_temp_max) { mask |= TB_AVAIL_CPU_TEMP_HOTTEST; }
+                            if t.gpu_sensor_count > 0 && sane_temp(t.gpu_temp_avg) { mask |= TB_AVAIL_GPU_TEMP; }
+                            if t.gpu_sensor_count > 0 && sane_temp(t.gpu_temp_max) { mask |= TB_AVAIL_GPU_TEMP_HOTTEST; }
+                            if t.cpu_sensor_count > 0 { mask |= TB_AVAIL_CPU_SENSOR_COUNT; }
+                            if t.gpu_sensor_count > 0 { mask |= TB_AVAIL_GPU_SENSOR_COUNT; }
+                            if metrics.cpu_power.is_finite() && metrics.cpu_power >= 0.0 { mask |= TB_AVAIL_CPU_POWER; }
+                            if metrics.gpu_power.is_finite() && metrics.gpu_power >= 0.0 { mask |= TB_AVAIL_GPU_POWER; }
+                            if metrics.ane_power.is_finite() && metrics.ane_power >= 0.0 { mask |= TB_AVAIL_ANE_POWER; }
+                            if metrics.ram_power.is_finite() && metrics.ram_power >= 0.0 { mask |= TB_AVAIL_DRAM_POWER; }
+                            if metrics.all_power.is_finite() && metrics.all_power >= 0.0 { mask |= TB_AVAIL_PACKAGE_POWER; }
+                            if metrics.pcpu_freq_mhz > 0 { mask |= TB_AVAIL_P_FREQ; }
+                            if metrics.ecpu_freq_mhz > 0 { mask |= TB_AVAIL_E_FREQ; }
+                            let sane_usage = |v: f32| v.is_finite() && (0.0..=1.0).contains(&v);
+                            if sane_usage(metrics.pcpu_usage_ratio) { mask |= TB_AVAIL_P_USAGE; }
+                            if sane_usage(metrics.ecpu_usage_ratio) { mask |= TB_AVAIL_E_USAGE; }
+                            if sane_usage(metrics.cpu_usage_ratio) { mask |= TB_AVAIL_CPU_USAGE; }
+                            if sane_usage(metrics.gpu_usage_ratio) { mask |= TB_AVAIL_GPU_USAGE; }
 
                             let sample = TBTelemetrySample {
                                 sequence_id: seq,
@@ -93,24 +123,9 @@ impl TelemetrySampler {
                                 cpu_utilization_ratio: metrics.cpu_usage_ratio as f64,
                                 gpu_utilization_ratio: metrics.gpu_usage_ratio as f64,
 
-                                available_mask: TB_AVAIL_CPU_TEMP
-                                    | TB_AVAIL_GPU_TEMP
-                                    | TB_AVAIL_CPU_POWER
-                                    | TB_AVAIL_GPU_POWER
-                                    | TB_AVAIL_ANE_POWER
-                                    | TB_AVAIL_DRAM_POWER
-                                    | TB_AVAIL_PACKAGE_POWER
-                                    | TB_AVAIL_P_FREQ
-                                    | TB_AVAIL_E_FREQ
-                                    | TB_AVAIL_P_USAGE
-                                    | TB_AVAIL_E_USAGE
-                                    | TB_AVAIL_CPU_USAGE
-                                    | TB_AVAIL_GPU_USAGE
-                                    | TB_AVAIL_CPU_TEMP_HOTTEST
-                                    | TB_AVAIL_GPU_TEMP_HOTTEST
-                                    | TB_AVAIL_CPU_SENSOR_COUNT
-                                    | TB_AVAIL_GPU_SENSOR_COUNT,
-                                valid_mask: !0,
+                                // (mask computed above — per-metric validity)
+                                available_mask: mask,
+                                valid_mask: mask,
                                 derived_mask: 0,
                                 warning_mask: 0,
                             };

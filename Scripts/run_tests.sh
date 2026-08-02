@@ -24,7 +24,7 @@ EOF
 
 SWIFT_SRC=$(find "$PROJECT_DIR/ThermalBench" -name "*.swift" ! -path "*/App/*" | sort)
 SWIFT_SRC="$SWIFT_SRC $BUILD_DIR/BuildIdentityGenerated.swift"
-TEST_SRC="$PROJECT_DIR/ThermalBenchTests/ThermalBenchTestMain.swift"
+TEST_SRC="$PROJECT_DIR/ThermalBenchTests/ThermalBenchTestMain.swift $PROJECT_DIR/ThermalBenchTests/ThermalBenchTestSuite.swift"
 
 swiftc \
     -sdk "$SDK_PATH" \
@@ -42,7 +42,7 @@ swiftc \
     -o "$TEST_BIN" \
     -module-name ThermalBenchTests \
     $SWIFT_SRC \
-    "$TEST_SRC" \
+    $TEST_SRC \
     "$BUILD_DIR/cpu_workload.o" \
     "$BUILD_DIR/sensor_bridge.o" \
     "$BUILD_DIR/core_utilization.o" \

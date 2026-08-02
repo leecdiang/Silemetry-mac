@@ -199,6 +199,7 @@ final class TestCoordinator {
                                           archivePath: archivePath(), uuid: runUUID,
                                           lastSample: accumulator.lastSample,
                                           startedAt: runStartedAt,
+                                          firstSample: accumulator.firstSample,
                                           device: runDeviceProfile)
             run.wasInterrupted = true
             run.phaseRaw = TestPhase.cancelled.rawValue
@@ -213,6 +214,7 @@ final class TestCoordinator {
                                               archivePath: archivePath(), uuid: runUUID,
                                               lastSample: accumulator.lastSample,
                                               startedAt: runStartedAt,
+                                              firstSample: accumulator.firstSample,
                                               device: runDeviceProfile)
                 run.wasInterrupted = true
                 run.phaseRaw = TestPhase.failed.rawValue
@@ -226,6 +228,7 @@ final class TestCoordinator {
                                           archivePath: archivePath(), uuid: runUUID,
                                           lastSample: accumulator.lastSample,
                                           startedAt: runStartedAt,
+                                          firstSample: accumulator.firstSample,
                                           device: runDeviceProfile)
             applyRawDataStatus(run)
             state = .complete(run)
@@ -307,7 +310,8 @@ final class TestCoordinator {
         let analysis = acc.makeAnalysis(config: config)
         let run = buildRunRecord(analysis: analysis, config: config,
                                  archivePath: archivePath, uuid: uuid,
-                                 lastSample: acc.lastSample)
+                                 lastSample: acc.lastSample,
+                                 firstSample: acc.firstSample)
         run.phaseRaw = TestPhase.cancelled.rawValue
         run.wasInterrupted = true
         return run
@@ -325,6 +329,7 @@ final class TestCoordinator {
                                        archivePath: String?, uuid: String,
                                        lastSample: TelemetrySample?,
                                        startedAt: Date? = nil,
+                                       firstSample: TelemetrySample? = nil,
                                        device: DeviceProfile = DeviceProfile.current) -> RunRecord {
         let run = RunRecord(config: config)
         run.uuid = uuid
@@ -334,6 +339,19 @@ final class TestCoordinator {
         run.sampleSpan = analysis.sampleSpan
         run.completedAt = Date()
         run.phaseRaw = TestPhase.completed.rawValue
+
+        // Power-source and low-power snapshots: first vs last sample, so a
+        // run that switched conditions mid-test is not presented as uniform.
+        if let first = firstSample, let last = lastSample {
+            run.powerSourceAtStart = first.acConnected
+            run.powerSourceAtEnd = last.acConnected
+            if let a = first.acConnected, let b = last.acConnected {
+                run.powerSourceChanged = a != b
+            }
+            run.lowPowerModeAtStart = first.lowPowerMode
+            run.lowPowerModeAtEnd = last.lowPowerMode
+            run.lowPowerModeChanged = first.lowPowerMode != last.lowPowerMode
+        }
 
         // Device info from the profile captured at test start.
         let dev = device

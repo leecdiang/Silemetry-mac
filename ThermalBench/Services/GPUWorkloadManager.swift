@@ -23,10 +23,6 @@ final class GPUWorkloadManager {
     /// Signalled when a dispatch loop actually exits (used by stop() to wait).
     private let loopGroup = DispatchGroup()
 
-    private var isRunning: Bool {
-        get { lock.withLock { _isRunning } }
-        set { lock.withLock { _isRunning = newValue } }
-    }
     private var stopFlag: Bool {
         get { lock.withLock { _stopFlag } }
         set { lock.withLock { _stopFlag = newValue } }
@@ -92,23 +88,26 @@ final class GPUWorkloadManager {
         guard intensity != .off else { return }
         lock.lock()
         if _isRunning { lock.unlock(); return }
+        // prepare() is idempotent and cheap after the first call; running it
+        // under the lock serializes the whole start critical section so two
+        // racing start() calls can never initialize the same command queue /
+        // pipelines / buffers concurrently.
+        guard prepare() else {
+            _isRunning = false
+            lock.unlock()
+            return
+        }
         _isRunning = true
         _stopFlag = false
         _generation += 1
         let gen = _generation
-        lock.unlock()
-
-        guard prepare() else {
-            isRunning = false
-            return
-        }
 
         let pipeline: MTLComputePipelineState?
         switch intensity {
         case .light:     pipeline = lightPipeline
         case .sustained,
              .combinedSoC: pipeline = heavyPipeline
-        case .off:       isRunning = false; return
+        case .off:       _isRunning = false; lock.unlock(); return
         }
 
         let item = DispatchWorkItem { [weak self] in
@@ -118,6 +117,8 @@ final class GPUWorkloadManager {
             self.gpuLoop(pipeline: pipeline, intensity: intensity, generation: gen)
         }
         workItem = item
+        lock.unlock()
+
         DispatchQueue.global(qos: .userInitiated).async(execute: item)
 
         print("[GPUWorkload] Started (\(intensity.displayName)) gen=\(gen)")

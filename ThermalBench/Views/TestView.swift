@@ -351,8 +351,9 @@ struct TestView: View {
     }
 
     /// Persist a finished run; only navigate to Results when the save
-    /// actually succeeds. On failure the record is kept for Retry / Export /
-    /// Discard.
+    /// actually succeeds. On failure the context is rolled back so the failed
+    /// insert cannot be flushed by an unrelated save() later — the record
+    /// stays detached for Retry / Export / Discard.
     private func persistRun(_ run: RunRecord) {
         modelContext.insert(run)
         do {
@@ -360,6 +361,7 @@ struct TestView: View {
             app.route = .result(run.uuid)
         } catch {
             print("[PERSIST] save error: \(error)")
+            modelContext.rollback()
             pendingRun = run
             showSaveFailure = true
         }
@@ -370,6 +372,9 @@ struct TestView: View {
             showSaveFailure = false
             return
         }
+        // Re-insert: the failed attempt was rolled back, so the record is
+        // detached and safe to insert again.
+        modelContext.insert(run)
         do {
             try modelContext.save()
             pendingRun = nil
@@ -377,6 +382,7 @@ struct TestView: View {
             app.route = .result(run.uuid)
         } catch {
             print("[PERSIST] retry save error: \(error)")
+            modelContext.rollback()
             // Keep the sheet up — the record is still unsaved.
         }
     }
@@ -387,20 +393,9 @@ struct TestView: View {
             goHome()
             return
         }
-        // Remove the unsaved record from the shared context — otherwise a
-        // later save() elsewhere could persist it after its JSONL is already
-        // gone, producing a record whose raw file no longer exists.
-        modelContext.delete(run)
+        // The failed save was rolled back, so the record is not registered in
+        // the context — nothing to delete there, just remove its sample files.
         SampleArchive.deleteFiles(for: run)
-        do {
-            try modelContext.save()
-        } catch {
-            print("[PERSIST] discard cleanup error: \(error)")
-            exportConfirmation = "Discard cleanup failed: \(error.localizedDescription)"
-            // Stay on the sheet — the record may still exist; do not pretend
-            // the discard succeeded.
-            return
-        }
         pendingRun = nil
         showSaveFailure = false
         goHome()

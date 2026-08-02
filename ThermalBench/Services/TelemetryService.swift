@@ -59,6 +59,12 @@ actor TelemetryService {
     private var isRunning = false
     private var startMonotonicNs: UInt64 = 0
     private var sampleCount = 0
+    /// ALL Rust-handle operations (create/start/wait/stop/destroy) run on this
+    /// serial queue. The actor is reentrant while awaiting, so without a shared
+    /// executor stopTelemetry() could destroy the handle while
+    /// tb_telemetry_wait_next is still blocked on it — a use-after-free in the
+    /// Rust FFI (raw pointer, no refcount). Serializing every FFI call closes
+    /// that window: a queued stop always runs after any in-flight wait returns.
     private let queue = DispatchQueue(label: "com.leecdiang.thermalbench.telemetry")
 
     func startTelemetry(intervalMilliseconds: Int = 1000) async throws {
@@ -71,22 +77,32 @@ actor TelemetryService {
         sampleCount = 0
         lastSeq = 0
 
-        // Create Rust sampler
-        guard let h = tb_telemetry_create() else {
-            isRunning = false
-            throw TelemetryError.initialization("tb_telemetry_create returned null")
+        // Create + start on the telemetry queue, serialized with any wait/
+        // stop from a previous session.
+        let startResult: Result<TBTelemetryHandle, TelemetryError> = await withCheckedContinuation { continuation in
+            queue.async {
+                guard let h = tb_telemetry_create() else {
+                    continuation.resume(returning: .failure(.initialization("tb_telemetry_create returned null")))
+                    return
+                }
+                let err = tb_telemetry_start(h, UInt32(max(intervalMilliseconds, 100)))
+                if err == TB_OK {
+                    continuation.resume(returning: .success(h))
+                } else {
+                    tb_telemetry_destroy(h)
+                    continuation.resume(returning: .failure(.initialization("tb_telemetry_start failed: \(err)")))
+                }
+            }
         }
-        handle = h
 
-        // Start background sampling at the requested cadence (ms)
-        let err = tb_telemetry_start(h, UInt32(max(intervalMilliseconds, 100)))
-        guard err == TB_OK else {
-            tb_telemetry_destroy(h)
-            handle = nil
+        switch startResult {
+        case .success(let h):
+            handle = h
+            core_util_reset()
+        case .failure(let error):
             isRunning = false
-            throw TelemetryError.initialization("tb_telemetry_start failed: \(err)")
+            throw error
         }
-        core_util_reset()
     }
 
     func readSample() async throws -> TelemetrySample {
@@ -98,52 +114,50 @@ actor TelemetryService {
                 return try await readSampleOnce()
             } catch TelemetryError.stopped {
                 if attempt == 9 {
-                    throw TelemetryError.stopped(readLastError())
+                    // No handle access here — the actor never touches the raw
+                    // pointer (it may already be torn down by stopTelemetry).
+                    throw TelemetryError.stopped(nil)
                 }
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
-        throw TelemetryError.stopped(readLastError())
+        throw TelemetryError.stopped(nil)
     }
 
     private func readSampleOnce() async throws -> TelemetrySample {
-        guard handle != nil, isRunning else {
+        guard let h = handle, isRunning else {
             throw TelemetryError.notStarted
         }
 
         let afterSeq = lastSeq
-        // Capture immutable copy for Sendable closure
-        let hCopy = handle
 
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                guard let h = hCopy else {
-                    continuation.resume(throwing: TelemetryError.notStarted)
-                    return
-                }
                 var raw = TBTelemetrySample()
                 let err = tb_telemetry_wait_next(h, afterSeq, 5000, &raw)
+                // Resolve everything that needs the raw handle HERE, on the
+                // queue, before any stop/destroy enqueued behind us can run.
+                // The actor side never touches the raw pointer again.
+                var detail: String?
+                if err == TB_ERR_STOPPED || err == TB_ERR_NOT_STARTED {
+                    var buf = [CChar](repeating: 0, count: 512)
+                    if tb_telemetry_last_error(h, &buf, 512) == TB_OK {
+                        let s = String(cString: buf)
+                        if !s.isEmpty { detail = s }
+                    }
+                }
                 let capturedRaw = raw
                 Task { @Sendable in
-                    await self.processResult(err: err, raw: capturedRaw, h: h, continuation: continuation)
+                    await self.processResult(err: err, raw: capturedRaw, errorDetail: detail, continuation: continuation)
                 }
             }
         }
-    }
-
-    private func readLastError() -> String? {
-        guard let h = handle else { return nil }
-        var buf = [CChar](repeating: 0, count: 512)
-        let rc = tb_telemetry_last_error(h, &buf, 512)
-        guard rc == TB_OK else { return nil }
-        let s = String(cString: buf)
-        return s.isEmpty ? nil : s
     }
 
     private func processResult(
         err: TBErrorCode,
         raw: TBTelemetrySample,
-        h: TBTelemetryHandle,
+        errorDetail: String?,
         continuation: CheckedContinuation<TelemetrySample, any Error>
     ) {
         switch err {
@@ -237,10 +251,7 @@ actor TelemetryService {
             continuation.resume(throwing: TelemetryError.timeout)
 
         case TB_ERR_STOPPED, TB_ERR_NOT_STARTED:
-            var buf = [CChar](repeating: 0, count: 512)
-            let rc = tb_telemetry_last_error(h, &buf, 512)
-            let detail = rc == TB_OK ? String(cString: buf) : ""
-            continuation.resume(throwing: TelemetryError.stopped(detail.isEmpty ? nil : detail))
+            continuation.resume(throwing: TelemetryError.stopped(errorDetail))
 
         default:
             continuation.resume(throwing: TelemetryError.readFailed("tb_telemetry_wait_next: \(err)"))
@@ -248,11 +259,18 @@ actor TelemetryService {
     }
 
     func stopTelemetry() async {
+        guard isRunning, let h = handle else { return }
         isRunning = false
-        if let h = handle {
-            tb_telemetry_stop(h)
-            tb_telemetry_destroy(h)
-            handle = nil
+        handle = nil
+        // Queue stop + destroy behind any in-flight wait_next: the serial
+        // queue guarantees the read returned (or timed out) before the Rust
+        // handle is torn down — no concurrent alias, no use-after-free.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                tb_telemetry_stop(h)
+                tb_telemetry_destroy(h)
+                continuation.resume()
+            }
         }
     }
 }
