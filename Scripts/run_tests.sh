@@ -22,6 +22,23 @@ enum BuildIdentityGenerated {
 }
 EOF
 
+# The test binary is a bare command-line tool with no app bundle. SwiftData's
+# ModelContainer (needed for @Model inits on macOS 14.x) requires a bundle
+# name; embed a minimal Info.plist into the __TEXT section so Bundle.main
+# resolves it.
+cat > "$BUILD_DIR/TestInfo.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>ThermalBenchTests</string>
+    <key>CFBundleIdentifier</key><string>com.leecdiang.ThermalBenchTests</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>0.1</string>
+</dict>
+</plist>
+PLIST
+
 SWIFT_SRC=$(find "$PROJECT_DIR/ThermalBench" -name "*.swift" ! -path "*/App/*" | sort)
 SWIFT_SRC="$SWIFT_SRC $BUILD_DIR/BuildIdentityGenerated.swift"
 TEST_SRC="$PROJECT_DIR/ThermalBenchTests/ThermalBenchTestMain.swift $PROJECT_DIR/ThermalBenchTests/ThermalBenchTestSuite.swift"
@@ -41,6 +58,7 @@ swiftc \
     -I"$BUILD_DIR" \
     -o "$TEST_BIN" \
     -module-name ThermalBenchTests \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$BUILD_DIR/TestInfo.plist" \
     $SWIFT_SRC \
     $TEST_SRC \
     "$BUILD_DIR/cpu_workload.o" \
