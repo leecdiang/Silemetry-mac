@@ -5,6 +5,11 @@ import SwiftData
 import AppKit
 import UniformTypeIdentifiers
 
+/// @MainActor: this view reads @MainActor AppModel/TestCoordinator state from
+/// computed properties outside body. The View protocol is only globally
+/// @MainActor on newer SDKs, so without the annotation Xcode 15.x (SDK 14.5)
+/// rejects those accesses as actor-isolation violations.
+@MainActor
 struct TestView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.modelContext) private var modelContext

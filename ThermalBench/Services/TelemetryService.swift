@@ -138,20 +138,24 @@ actor TelemetryService {
                 // Resolve everything that needs the raw handle HERE, on the
                 // queue, before any stop/destroy enqueued behind us can run.
                 // The actor side never touches the raw pointer again.
-                var detail: String?
-                if err == TB_ERR_STOPPED || err == TB_ERR_NOT_STARTED {
-                    var buf = [CChar](repeating: 0, count: 512)
-                    if tb_telemetry_last_error(h, &buf, 512) == TB_OK {
-                        let s = String(cString: buf)
-                        if !s.isEmpty { detail = s }
-                    }
-                }
+                let detail = Self.readErrorDetail(h, err)
                 let capturedRaw = raw
                 Task { @Sendable in
                     await self.processResult(err: err, raw: capturedRaw, errorDetail: detail, continuation: continuation)
                 }
             }
         }
+    }
+
+    /// Read the Rust last-error string for a stopped/not-started result. Runs
+    /// on the telemetry queue while the handle is still alive; the actor side
+    /// never touches the raw pointer.
+    private static func readErrorDetail(_ h: TBTelemetryHandle, _ err: TBErrorCode) -> String? {
+        guard err == TB_ERR_STOPPED || err == TB_ERR_NOT_STARTED else { return nil }
+        var buf = [CChar](repeating: 0, count: 512)
+        guard tb_telemetry_last_error(h, &buf, 512) == TB_OK else { return nil }
+        let s = String(cString: buf)
+        return s.isEmpty ? nil : s
     }
 
     private func processResult(
