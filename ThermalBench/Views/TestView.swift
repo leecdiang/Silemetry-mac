@@ -2,6 +2,8 @@
 import SwiftUI
 import Charts
 import SwiftData
+import AppKit
+import UniformTypeIdentifiers
 
 struct TestView: View {
     @Environment(AppModel.self) private var app
@@ -10,6 +12,10 @@ struct TestView: View {
     @State private var showCancelConfirm = false
     @State private var failureMessage: String?
     @State private var showFailure = false
+    /// Run that finished but could not be persisted — drives the save-failure sheet.
+    @State private var pendingRun: RunRecord?
+    @State private var showSaveFailure = false
+    @State private var exportConfirmation: String?
 
     enum CoreKind { case efficiency, performance }
 
@@ -50,36 +56,27 @@ struct TestView: View {
             if case .complete(let run) = newState {
                 // Only save if there are valid samples
                 guard run.sampleCount > 0, run.duration > 0 else {
-                    app.route = .home
+                    goHome()
                     return
                 }
-                modelContext.insert(run)
-                do { try modelContext.save() } catch {
-                    print("[PERSIST] save error: \(error)")
-                }
-                app.route = .result(run.uuid)
+                persistRun(run)
             }
             if case .cancelled(let run) = newState {
                 // Stopped with data — persist the coordinator-built final record.
                 guard run.sampleCount > 0, run.duration > 0 else {
-                    app.route = .home
-                    app.resetForNewRun()
+                    goHome()
                     return
                 }
-                modelContext.insert(run)
-                do { try modelContext.save() } catch {
-                    print("[PERSIST] save error: \(error)")
-                }
-                app.route = .result(run.uuid)
+                persistRun(run)
             }
             if case .discarded = newState {
                 // Explicitly discarded — nothing to persist.
-                app.route = .home
-                app.resetForNewRun()
+                goHome()
             }
             if case .failed(let message) = newState {
-                // Telemetry failure — surface it; the coordinator has already
-                // cleaned up, so this is the only feedback the user gets.
+                // Telemetry failure. The coordinator cleaned up and finalized
+                // through the unified flow; offer Save Partial Run / Discard
+                // when a partial record was captured.
                 failureMessage = message
                 showFailure = true
             }
@@ -96,8 +93,8 @@ struct TestView: View {
             metricItem("CPU Hottest", value: tempStr(coord.latest?.cpuTempHottest))
             metricItem("CPU Avg", value: tempStr(coord.latest?.cpuTemp))
             metricItem("GPU Hottest", value: tempStr(coord.latest?.gpuTempHottest))
-            metricItem("Power", value: powerStr(coord.latest?.cpuPower))
-            metricItem("P-Core", value: freqStr(coord.latest?.pClusterFreqMHz))
+            powerMetric
+            freqMetric
             metricItem("Thermal", value: thermalStr(coord.latest?.thermalState))
             Spacer()
             if case .onBattery = app.powerSource {
@@ -107,6 +104,32 @@ struct TestView: View {
                 .lineLimit(1).fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 16).padding(.vertical, 8).background(.bar)
+    }
+
+    /// Power metric follows the active workload: CPU Only → CPU power,
+    /// GPU Only → GPU power, Combined → package power (CPU fallback).
+    @ViewBuilder
+    var powerMetric: some View {
+        switch coord.testConfig.workloadType {
+        case .cpuOnly:
+            metricItem("CPU Power", value: powerStr(coord.latest?.cpuPower))
+        case .gpuOnly:
+            metricItem("GPU Power", value: powerStr(coord.latest?.gpuPower))
+        case .combined:
+            if let pkg = coord.latest?.packagePower {
+                metricItem("Package Power", value: powerStr(pkg))
+            } else {
+                metricItem("CPU Power", value: powerStr(coord.latest?.cpuPower))
+            }
+        }
+    }
+
+    /// Frequency metric is load-relevant for CPU-bearing workloads only.
+    @ViewBuilder
+    var freqMetric: some View {
+        if coord.testConfig.workloadType != .gpuOnly {
+            metricItem("P-Core", value: freqStr(coord.latest?.pClusterFreqMHz))
+        }
     }
 
     var phaseBadge: some View {
@@ -273,13 +296,142 @@ struct TestView: View {
             Text("Data will not be saved.")
         }
         .alert("Test Failed", isPresented: $showFailure) {
-            Button("OK") {
-                app.route = .home
-                app.resetForNewRun()
+            if coord.partialRun != nil {
+                Button("Save Partial Run") { savePartialRun() }
+                Button("Discard", role: .destructive) { discardFailedRun() }
+            } else {
+                Button("OK") { goHome() }
             }
         } message: {
             Text(failureMessage ?? "Unknown failure")
         }
+        .sheet(isPresented: $showSaveFailure) {
+            saveFailureSheet
+        }
+    }
+
+    // MARK: - Save-Failure Handling
+
+    /// The test finished, but its record could not be saved. Offer Retry,
+    /// Export Raw Data, or Discard instead of silently landing on a Results
+    /// page that cannot re-fetch the run.
+    var saveFailureSheet: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(.orange)
+            Text("The test finished, but its record could not be saved.")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            if let exportConfirmation {
+                Text(exportConfirmation)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            HStack(spacing: 12) {
+                Button { exportRawData() } label: {
+                    Label("Export Raw Data", systemImage: "square.and.arrow.up")
+                }
+                Button { retryPersist() } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                Button(role: .destructive) { discardPending() } label: {
+                    Label("Discard", systemImage: "trash")
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(28)
+        .frame(width: 440)
+    }
+
+    private func goHome() {
+        app.route = .home
+        app.resetForNewRun()
+    }
+
+    /// Persist a finished run; only navigate to Results when the save
+    /// actually succeeds. On failure the record is kept for Retry / Export /
+    /// Discard.
+    private func persistRun(_ run: RunRecord) {
+        modelContext.insert(run)
+        do {
+            try modelContext.save()
+            app.route = .result(run.uuid)
+        } catch {
+            print("[PERSIST] save error: \(error)")
+            pendingRun = run
+            showSaveFailure = true
+        }
+    }
+
+    private func retryPersist() {
+        guard let run = pendingRun else {
+            showSaveFailure = false
+            return
+        }
+        do {
+            try modelContext.save()
+            pendingRun = nil
+            showSaveFailure = false
+            app.route = .result(run.uuid)
+        } catch {
+            print("[PERSIST] retry save error: \(error)")
+            // Keep the sheet up — the record is still unsaved.
+        }
+    }
+
+    private func discardPending() {
+        if let run = pendingRun {
+            SampleArchive.deleteFiles(for: run)
+            pendingRun = nil
+        }
+        showSaveFailure = false
+        goHome()
+    }
+
+    /// Copy the raw JSONL out so the data survives even if the DB record
+    /// cannot.
+    private func exportRawData() {
+        guard let run = pendingRun else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export Raw Data"
+        panel.nameFieldStringValue = "\(run.name)-samples.jsonl"
+        panel.allowedContentTypes = [.json]
+        panel.begin { response in
+            guard response == .OK, let dest = panel.url else { return }
+            do {
+                let src = SampleArchive.samplesFile(for: run.uuid).path
+                if FileManager.default.fileExists(atPath: src) {
+                    try FileManager.default.copyItem(atPath: src, toPath: dest.path)
+                } else if run.dataDirectory.hasPrefix("/"), FileManager.default.fileExists(atPath: run.dataDirectory) {
+                    try FileManager.default.copyItem(atPath: run.dataDirectory, toPath: dest.path)
+                } else {
+                    throw NSError(domain: "ThermalBench", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "No raw sample file was written for this run."])
+                }
+                exportConfirmation = "Exported: \(dest.lastPathComponent)"
+            } catch {
+                exportConfirmation = "Export failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Failure with captured samples — keep the partial record.
+    private func savePartialRun() {
+        guard let run = coord.partialRun else {
+            goHome()
+            return
+        }
+        persistRun(run)
+    }
+
+    /// Failure — user chose to discard the partial data.
+    private func discardFailedRun() {
+        if let run = coord.partialRun {
+            SampleArchive.deleteFiles(for: run)
+        }
+        goHome()
     }
 
     // MARK: - Helpers

@@ -90,11 +90,11 @@ enum ThermalStateTag: String, Codable {
     case nominal, fair, serious, critical, unknown
 }
 
-/// Integrity of the raw sample archive for a run.
-/// - complete: all samples were written to the JSONL archive
-/// - partial: some archive writes failed — the raw curve is missing tail data
-/// - unavailable: no raw data was ever persisted
-enum RawDataStatus: String, Codable {
+    /// Integrity of the raw sample archive for a run.
+    /// - complete: all samples were written to the JSONL archive
+    /// - partial: some archive writes failed — the raw curve is missing tail data
+    /// - unavailable: no raw data was ever persisted
+    enum RawDataStatus: String, Codable {
     case complete, partial, unavailable
 
     var displayName: String {
@@ -142,10 +142,18 @@ final class RunRecord {
     var dataDirectory: String = ""
     var sampleCount: Int = 0
     var duration: TimeInterval = 0
+    /// Span covered by recorded samples (last - first elapsed). Kept separate
+    /// from duration — legacy runs have 0 (not written before this field).
+    var sampleSpan: TimeInterval = 0
 
-    // ── Raw archive integrity (Summary vs raw curve consistency) ──
+    /// Raw archive integrity (Summary vs raw curve consistency) ──
     var rawDataStatusRaw: String = RawDataStatus.complete.rawValue
     var rawDataError: String?
+
+    /// Decoded raw-data integrity (defaults to complete for legacy runs).
+    var rawDataStatus: RawDataStatus {
+        RawDataStatus(rawValue: rawDataStatusRaw) ?? .complete
+    }
 
     // ── Configuration snapshot (empty/zero = legacy run) ──
     var workloadTypeRaw: String = ""

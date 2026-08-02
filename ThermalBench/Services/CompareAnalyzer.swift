@@ -65,7 +65,7 @@ struct ComparabilityResult: Equatable {
 enum CompareAnalyzer {
 
     /// Current analysis version — bump when check logic changes.
-    static let analysisVersion = 2
+    static let analysisVersion = 3
 
     static func analyze(a: RunRecord, b: RunRecord) -> ComparabilityResult {
         var warnings: [ComparabilityWarning] = []
@@ -128,10 +128,12 @@ enum CompareAnalyzer {
 
         // ── Configuration snapshot (empty/zero = legacy run) ───────────
 
-        fields.append(checkField(id: "workload", label: "Workload Type",
-                                 a: a.workloadTypeRaw, b: b.workloadTypeRaw,
-                                 aLegacy: nil, bLegacy: nil,
-                                 warnings: &warnings))
+        // Workload type — trust the recorded snapshot only. Legacy runs
+        // without the field show "unverified" rather than a power-based guess
+        // (CPU idle power is > 0 even during GPU-only tests, so peak-power
+        // inference is unreliable).
+        fields.append(checkWorkloadField(a: a.workloadTypeRaw, b: b.workloadTypeRaw,
+                                         warnings: &warnings))
 
         fields.append(checkField(id: "cpuCores", label: "CPU Core Target",
                                  a: a.cpuCoreTypeRaw, b: b.cpuCoreTypeRaw,
@@ -222,14 +224,27 @@ enum CompareAnalyzer {
                                  aLegacy: nil, bLegacy: nil,
                                  warnings: &warnings))
 
-        // workloadType — not stored directly; infer from testModeRaw + metrics
-        // For now, flag if modes differ
-        let aCpuUsed = (a.cpuPeakPower ?? 0) > 0
-        let bCpuUsed = (b.cpuPeakPower ?? 0) > 0
-        if aCpuUsed != bCpuUsed {
+        // ── Raw archive integrity (Summary vs raw curve consistency) ────
+
+        let rawA = a.rawDataStatus
+        let rawB = b.rawDataStatus
+        let rawMatch = rawA == .complete && rawB == .complete
+        fields.append(ComparabilityField(id: "rawData", label: "Raw Data",
+                                         valueA: rawA.displayName,
+                                         valueB: rawB.displayName,
+                                         match: rawMatch))
+        if rawA != .complete {
             warnings.append(ComparabilityWarning(
-                id: "cpu_load", field: "CPU Load", severity: .warning,
-                detail: "CPU load differs between runs"
+                id: rawA == .partial ? "raw_partial_a" : "raw_unavailable_a",
+                field: "Raw Data", severity: .warning,
+                detail: "Run A raw data is \(rawA.displayName.lowercased()) — its curve may be incomplete or absent (Summary remains valid)"
+            ))
+        }
+        if rawB != .complete {
+            warnings.append(ComparabilityWarning(
+                id: rawB == .partial ? "raw_partial_b" : "raw_unavailable_b",
+                field: "Raw Data", severity: .warning,
+                detail: "Run B raw data is \(rawB.displayName.lowercased()) — its curve may be incomplete or absent (Summary remains valid)"
             ))
         }
 
@@ -322,6 +337,54 @@ enum CompareAnalyzer {
     }
 
     // MARK: - Helpers
+
+    /// Workload-type comparison. The recorded workloadTypeRaw snapshot is the
+    /// only trusted source — legacy runs without it are "unverified", never
+    /// guessed from power metrics (idle CPU power is nonzero even in
+    /// GPU-only tests).
+    private static func checkWorkloadField(
+        a: String, b: String,
+        warnings: inout [ComparabilityWarning]
+    ) -> ComparabilityField {
+        let legacyA = a.isEmpty
+        let legacyB = b.isEmpty
+
+        if legacyA && legacyB {
+            warnings.append(ComparabilityWarning(
+                id: "workload_both_legacy", field: "Workload Type", severity: .warning,
+                detail: "Workload type unverified for both runs — CPU/GPU load assumptions unchecked"
+            ))
+            return ComparabilityField(id: "workload", label: "Workload Type",
+                                      valueA: "Workload type unverified",
+                                      valueB: "Workload type unverified",
+                                      match: false)
+        }
+        if legacyA {
+            warnings.append(ComparabilityWarning(
+                id: "workload_legacy_a", field: "Workload Type", severity: .info,
+                detail: "Run A: workload type unverified"
+            ))
+            return ComparabilityField(id: "workload", label: "Workload Type",
+                                      valueA: "Workload type unverified", valueB: b, match: false)
+        }
+        if legacyB {
+            warnings.append(ComparabilityWarning(
+                id: "workload_legacy_b", field: "Workload Type", severity: .info,
+                detail: "Run B: workload type unverified"
+            ))
+            return ComparabilityField(id: "workload", label: "Workload Type",
+                                      valueA: a, valueB: "Workload type unverified", match: false)
+        }
+
+        let same = a == b
+        if !same {
+            warnings.append(ComparabilityWarning(
+                id: "workload_diff", field: "Workload Type", severity: .warning,
+                detail: "Different workload type — A: \(a), B: \(b)"
+            ))
+        }
+        return ComparabilityField(id: "workload", label: "Workload Type", valueA: a, valueB: b, match: same)
+    }
 
     private static func isLegacy(_ v: String) -> Bool {
         v.isEmpty

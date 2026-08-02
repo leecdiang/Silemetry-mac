@@ -20,10 +20,16 @@ final class TestCoordinator {
     var latest: TelemetrySample? = nil
     /// Set when the sample archive failed to write (surfaced in the UI).
     var archiveError: String?
+    /// Built when telemetry fails fatally but samples were captured. The UI
+    /// can offer to save this partial run or discard it.
+    var partialRun: RunRecord?
 
     enum FinishReason {
         case saveInterrupted
         case discarded
+        /// Fatal telemetry failure — finalize what we have so the user can
+        /// keep a partial record instead of losing everything to an early return.
+        case failedSavePartial
     }
 
     private let telemetry = TelemetryService.shared
@@ -37,6 +43,9 @@ final class TestCoordinator {
     /// only at finalization, so without this the "Started" time would be the
     /// end time.
     private var runStartedAt = Date()
+    /// Device profile captured at test start — final records describe the
+    /// machine as it was when the test began, not when it ended.
+    private var runDeviceProfile = DeviceProfile.current
     /// Samples awaiting flush to the archive file (streamed, not held forever).
     private var archiveBuffer: [TelemetrySample] = []
     /// True once the archive write failed — stop buffering to avoid unbounded growth.
@@ -65,7 +74,9 @@ final class TestCoordinator {
         consecutiveReadFailures = 0
         lastTelemetryError = nil
         runStartedAt = Date()
+        runDeviceProfile = DeviceProfile.current
         runUUID = UUID().uuidString
+        partialRun = nil
         archiveBuffer.removeAll(keepingCapacity: true)
         samples.removeAll()
         accumulator = RunAccumulator()
@@ -96,15 +107,20 @@ final class TestCoordinator {
                     consecutiveReadFailures += 1
                     lastTelemetryError = error.localizedDescription
                     if consecutiveReadFailures > 10 {
-                        await cleanup()
-                        state = .failed("Telemetry read failed \(consecutiveReadFailures) times")
-                        return
+                        // Do NOT return here — fall through to the unified
+                        // cleanup → flushArchive → finalization flow so the
+                        // buffered tail is written and a partial record can
+                        // be offered.
+                        finishReason = .failedSavePartial
+                        break
                     }
                     continue
                 }
 
                 let totalElapsed = Double(DispatchTime.now().uptimeNanoseconds - startTime) / 1_000_000_000
-                state = .running(.baseline, elapsed: totalElapsed, remaining: totalElapsed)
+                // Monitor Only is a single infinite phase — publish the real
+                // phase (not .baseline) and no remaining time.
+                state = .running(.monitoringExternal, elapsed: totalElapsed, remaining: 0)
             }
         } else {
             // Standard phased test
@@ -147,9 +163,11 @@ final class TestCoordinator {
                         consecutiveReadFailures += 1
                         lastTelemetryError = error.localizedDescription
                         if consecutiveReadFailures > 10 {
-                            await cleanup()
-                            state = .failed("Telemetry read failed \(consecutiveReadFailures) times")
-                            return
+                            // Same as monitor-only: no early return — the
+                            // unified finalization below writes the buffered
+                            // tail and offers a partial record.
+                            finishReason = .failedSavePartial
+                            break
                         }
                         continue
                     }
@@ -180,17 +198,35 @@ final class TestCoordinator {
             let run = Self.buildRunRecord(analysis: analysis, config: testConfig,
                                           archivePath: archivePath(), uuid: runUUID,
                                           lastSample: accumulator.lastSample,
-                                          startedAt: runStartedAt)
+                                          startedAt: runStartedAt,
+                                          device: runDeviceProfile)
             run.wasInterrupted = true
             run.phaseRaw = TestPhase.cancelled.rawValue
             applyRawDataStatus(run)
             state = .cancelled(run)
+        case .failedSavePartial:
+            // Fatal telemetry failure with captured samples: keep the partial
+            // record for the UI to offer (Save Partial Run / Discard).
+            if accumulator.sampleCount > 0 {
+                let analysis = accumulator.makeAnalysis(config: testConfig)
+                let run = Self.buildRunRecord(analysis: analysis, config: testConfig,
+                                              archivePath: archivePath(), uuid: runUUID,
+                                              lastSample: accumulator.lastSample,
+                                              startedAt: runStartedAt,
+                                              device: runDeviceProfile)
+                run.wasInterrupted = true
+                run.phaseRaw = TestPhase.failed.rawValue
+                applyRawDataStatus(run)
+                partialRun = run
+            }
+            state = .failed(lastTelemetryError ?? "Telemetry read failed \(consecutiveReadFailures) times")
         case nil:
             let analysis = accumulator.makeAnalysis(config: testConfig)
             let run = Self.buildRunRecord(analysis: analysis, config: config,
                                           archivePath: archivePath(), uuid: runUUID,
                                           lastSample: accumulator.lastSample,
-                                          startedAt: runStartedAt)
+                                          startedAt: runStartedAt,
+                                          device: runDeviceProfile)
             applyRawDataStatus(run)
             state = .complete(run)
         }
@@ -288,17 +324,19 @@ final class TestCoordinator {
     private static func buildRunRecord(analysis: RunAnalysis, config: TestConfiguration,
                                        archivePath: String?, uuid: String,
                                        lastSample: TelemetrySample?,
-                                       startedAt: Date? = nil) -> RunRecord {
+                                       startedAt: Date? = nil,
+                                       device: DeviceProfile = DeviceProfile.current) -> RunRecord {
         let run = RunRecord(config: config)
         run.uuid = uuid
         run.createdAt = startedAt ?? Date()
         run.sampleCount = analysis.sampleCount
         run.duration = analysis.duration
+        run.sampleSpan = analysis.sampleSpan
         run.completedAt = Date()
         run.phaseRaw = TestPhase.completed.rawValue
 
-        // Populate device info from current profile
-        let dev = DeviceProfile.current
+        // Device info from the profile captured at test start.
+        let dev = device
         run.deviceModelIdentifier = dev.modelIdentifier
         run.chipName = dev.chipName
         run.cpuCoreCount = dev.cpuCoreCount

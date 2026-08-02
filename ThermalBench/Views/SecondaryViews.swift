@@ -89,9 +89,11 @@ struct ResultsView: View {
         }
         .onAppear {
             guard cachedSamples == nil else { return }
-            let r = run
+            // Only the data path string crosses the isolation boundary —
+            // never the SwiftData model object itself.
+            let path = run.dataDirectory
             Task.detached(priority: .userInitiated) {
-                let loaded = SampleArchive.load(from: r)
+                let loaded = SampleArchive.load(dataDirectory: path)
                 await MainActor.run { cachedSamples = loaded }
             }
         }
@@ -683,8 +685,13 @@ struct CompareView: View {
     @ViewBuilder
     func compareContent(a: RunRecord, b: RunRecord) -> some View {
         let result = CompareAnalyzer.analyze(a: a, b: b)
-        let sa = result.canCompare ? (samplesA ?? []) : []
-        let sb = result.canCompare ? (samplesB ?? []) : []
+        // Raw-curve availability per run: partial runs keep summary
+        // comparability but flag their curve; unavailable runs are summary-
+        // only and never draw a curve.
+        let rawA = a.rawDataStatus
+        let rawB = b.rawDataStatus
+        let sa = result.canCompare && rawA != .unavailable ? (samplesA ?? []) : []
+        let sb = result.canCompare && rawB != .unavailable ? (samplesB ?? []) : []
         let loading = loadingComparison && result.canCompare
 
         ScrollView {
@@ -743,6 +750,22 @@ struct CompareView: View {
                                 .font(.caption)
                             }
                         }
+                    }
+                }
+
+                // ── Raw data integrity banner ──
+                if rawA != .complete || rawB != .complete {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if rawA != .complete {
+                                rawWarningLabel(run: "Run A", status: rawA)
+                            }
+                            if rawB != .complete {
+                                rawWarningLabel(run: "Run B", status: rawB)
+                            }
+                        }
+                    } label: {
+                        Label("Raw Data", systemImage: "externaldrive.badge.exclamationmark")
                     }
                 }
 
@@ -918,6 +941,25 @@ struct CompareView: View {
     }
 
     // MARK: - Compare Helpers
+
+    @ViewBuilder
+    private func rawWarningLabel(run: String, status: RawDataStatus) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: status == .partial
+                  ? "exclamationmark.triangle.fill"
+                  : "xmark.octagon.fill")
+                .font(.caption)
+                .foregroundStyle(status == .partial ? .orange : .red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(run) \(status.displayName.lowercased())")
+                    .font(.caption).bold()
+                Text(status == .partial
+                     ? "Raw curve may be incomplete — Summary numbers remain valid."
+                     : "Raw curve unavailable — summary-only comparison, no curve drawn for this run.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
 
     func levelColor(_ level: ComparabilityLevel) -> Color {
         switch level {

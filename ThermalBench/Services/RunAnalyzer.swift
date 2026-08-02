@@ -3,7 +3,12 @@
 import Foundation
 
 struct RunAnalysis {
+    /// Total test duration — time from telemetry start to the last sample
+    /// (includes the pre-first-sample gap). Never a span of samples only.
     let duration: TimeInterval
+    /// Span covered by the recorded samples (last - first elapsed). Kept
+    /// separate from total duration — they are not the same thing.
+    let sampleSpan: TimeInterval
     let sampleCount: Int
     let validSamples: Int
 
@@ -50,12 +55,16 @@ enum RunAnalyzer {
     static func analyze(samples: [TelemetrySample], config: TestConfiguration) -> RunAnalysis {
         let valid = samples.filter { $0.tempValid || $0.powerValid || $0.freqValid }
 
-        // Duration
-        let duration: TimeInterval
+        // Duration: total time from telemetry start to the last sample.
+        // A single-sample run still has a real duration (its elapsed time),
+        // and the pre-first-sample gap is counted. The pure sample span is
+        // kept separately as sampleSpan.
+        let duration: TimeInterval = valid.last?.elapsedSeconds ?? 0
+        let sampleSpan: TimeInterval
         if let first = valid.first?.elapsedSeconds, let last = valid.last?.elapsedSeconds {
-            duration = last - first
+            sampleSpan = last - first
         } else {
-            duration = 0
+            sampleSpan = 0
         }
 
         // Temperature — per-channel availability (nil field = channel absent).
@@ -124,6 +133,7 @@ enum RunAnalyzer {
 
         return RunAnalysis(
             duration: duration,
+            sampleSpan: sampleSpan,
             sampleCount: total,
             validSamples: valid.count,
             cpuPeakTemp: cpuPeakTemp,

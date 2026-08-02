@@ -44,6 +44,12 @@ struct StatusPill: View {
 extension StatusPill {
     /// Build a pill for a test phase.
     init(phase: TestPhase?, isMonitorOnly: Bool) {
+        // Monitor Only publishes .monitoringExternal while running — prefer
+        // the real phase so the pill reflects the underlying state.
+        if let p = phase, p == .monitoringExternal {
+            self.init(label: p.displayLabel, shortLabel: p.shortLabel, color: p.pillColor, dotSize: 8)
+            return
+        }
         if isMonitorOnly {
             self.init(
                 label: "Monitoring",

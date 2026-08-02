@@ -619,6 +619,7 @@ func runAllTests() {
         try assertEqual(analysis.cpuPeakTemp!, 99.0)
         try assertEqual(analysis.sampleCount, 8000)
         try assertEqual(analysis.duration, 7999.0)
+        try assertEqual(analysis.sampleSpan, 7999.0)
 
         // Ring-buffer view (last 7200) misses the early peak:
         var ring = RunAccumulator()
@@ -635,6 +636,120 @@ func runAllTests() {
         ring.add(Array(all.suffix(7200)))
         let ringAnalysis = ring.makeAnalysis(config: TestConfiguration())
         try assertFalse(ringAnalysis.cpuPeakTemp! == 99.0)
+    }
+
+    test("RunAccumulator duration includes pre-first-sample gap") {
+        // Telemetry starts at t=0 but the first sample lands at t=5; last at
+        // t=10. Duration must be the total elapsed (10), not the sample span
+        // (5) — otherwise the lead-in time is silently dropped.
+        var acc = RunAccumulator()
+        for i in 0..<3 {
+            var s = TelemetrySample()
+            s.elapsedSeconds = 5.0 + Double(i) * 2.5
+            s.cpuTempHottest = 50
+            s.tempValid = true
+            acc.add(s)
+        }
+        let analysis = acc.makeAnalysis(config: TestConfiguration())
+        try assertEqual(analysis.duration, 10.0)
+        try assertEqual(analysis.sampleSpan, 5.0)
+    }
+
+    test("RunAccumulator single sample keeps real duration") {
+        var acc = RunAccumulator()
+        var s = TelemetrySample()
+        s.elapsedSeconds = 2.0
+        s.cpuTempHottest = 51
+        s.tempValid = true
+        acc.add(s)
+        let analysis = acc.makeAnalysis(config: TestConfiguration())
+        // Previously last-first = 0, which made TestView reject the run.
+        try assertEqual(analysis.duration, 2.0)
+        try assertEqual(analysis.sampleSpan, 0.0)
+        try assertEqual(analysis.sampleCount, 1)
+    }
+
+    test("RunAnalyzer single sample keeps real duration") {
+        var samples: [TelemetrySample] = []
+        var s = TelemetrySample()
+        s.elapsedSeconds = 3.0
+        s.cpuTempHottest = 52
+        s.tempValid = true
+        samples.append(s)
+        let analysis = RunAnalyzer.analyze(samples: samples, config: TestConfiguration())
+        try assertEqual(analysis.duration, 3.0)
+        try assertEqual(analysis.sampleSpan, 0.0)
+    }
+
+    // ── Compare: raw archive integrity ─────────────────────────────────
+    test("Compare: partial raw data warns but stays comparable") {
+        let a = RunRecord.make()
+        let b = RunRecord.make()
+        a.rawDataStatusRaw = RawDataStatus.partial.rawValue
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.canCompare)
+        try assertTrue(r.warnings.contains { $0.id == "raw_partial_a" })
+        let f = r.fields.first { $0.id == "rawData" }
+        try assertNotNil(f)
+        try assertFalse(f!.match)
+    }
+
+    test("Compare: unavailable raw data warns but stays comparable") {
+        let a = RunRecord.make()
+        let b = RunRecord.make()
+        b.rawDataStatusRaw = RawDataStatus.unavailable.rawValue
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertEqual(r.level, .comparableWithWarnings)
+        try assertTrue(r.canCompare)
+        try assertTrue(r.warnings.contains { $0.id == "raw_unavailable_b" })
+    }
+
+    test("Compare: complete raw data on both sides matches") {
+        let a = RunRecord.make()
+        let b = RunRecord.make()
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        let f = r.fields.first { $0.id == "rawData" }
+        try assertNotNil(f)
+        try assertTrue(f!.match)
+        try assertFalse(r.warnings.contains { $0.id.hasPrefix("raw_") })
+    }
+
+    // ── Compare: workload type trusted, not inferred from power ────────
+    test("Compare: no CPU-load inference from power metrics") {
+        // Both runs are GPU Only — but run A has nonzero cpuPeakPower from
+        // system background activity. The old power-based inference would
+        // flag a false CPU-load mismatch; the new rule must not.
+        let a = RunRecord.make(cpuPower: 12.0, workload: "gpuOnly")
+        let b = RunRecord.make(cpuPower: 0.0, workload: "gpuOnly")
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        try assertFalse(r.warnings.contains { $0.id == "cpu_load" })
+        try assertFalse(r.warnings.contains { $0.field == "CPU Load" })
+    }
+
+    test("Compare: legacy workload shows unverified, not a guess") {
+        let a = RunRecord.make(workload: "")
+        let b = RunRecord.make()
+        let r = CompareAnalyzer.analyze(a: a, b: b)
+        let f = r.fields.first { $0.id == "workload" }
+        try assertNotNil(f)
+        try assertTrue(f!.valueA.contains("unverified") || f!.valueA.contains("Unverified"))
+        try assertTrue(r.warnings.contains { $0.id == "workload_legacy_a" })
+    }
+
+    // ── RunRecord rawDataStatus decoding ───────────────────────────────
+    test("RunRecord rawDataStatus decodes with legacy default") {
+        let run = RunRecord(config: TestConfiguration())
+        try assertEqual(run.rawDataStatus, .complete)
+        run.rawDataStatusRaw = RawDataStatus.partial.rawValue
+        try assertEqual(run.rawDataStatus, .partial)
+        run.rawDataStatusRaw = "garbage"
+        try assertEqual(run.rawDataStatus, .complete)
+    }
+
+    test("RunRecord sampleSpan defaults to zero for legacy") {
+        let run = RunRecord(config: TestConfiguration())
+        try assertEqual(run.sampleSpan, 0)
     }
 
     // ── Report ──────────────────────────────────────────────────────────

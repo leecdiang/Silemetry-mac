@@ -87,7 +87,11 @@ struct RunAccumulator {
     /// Build a full RunAnalysis from the accumulated state. Phase spans follow
     /// the configured test phases (same layout as RunAnalyzer).
     func makeAnalysis(config: TestConfiguration) -> RunAnalysis {
-        let duration = (lastElapsed ?? 0) - (firstElapsed ?? 0)
+        // Total duration = time from telemetry start to the last sample.
+        // Single-sample runs keep a real duration and the pre-first-sample
+        // gap is not lost. The sample span is tracked separately.
+        let duration = lastElapsed ?? 0
+        let sampleSpan = (lastElapsed ?? 0) - (firstElapsed ?? 0)
 
         // Phase spans from config
         var offset: TimeInterval = 0
@@ -115,6 +119,7 @@ struct RunAccumulator {
         let total = sampleCount
         return RunAnalysis(
             duration: duration,
+            sampleSpan: sampleSpan,
             sampleCount: sampleCount,
             validSamples: validSampleCount,
             cpuPeakTemp: cpuPeakTemp,
