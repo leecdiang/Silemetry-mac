@@ -52,9 +52,20 @@ struct TelemetrySample: Identifiable, Codable {
     var phase: TestPhase = .baseline
 }
 
+/// Opaque Sendable wrapper around the raw FFI handle (`void *`).
+/// Safety invariant: the raw pointer is ONLY ever touched on
+/// `TelemetryService.queue`, which serializes create/start/wait/stop/destroy
+/// and guarantees a queued stop runs after any in-flight wait returns.
+/// The unchecked conformance just acknowledges that invariant to the type
+/// system so the handle can cross the `@Sendable` closure boundary.
+final class TelemetryHandleBox: @unchecked Sendable {
+    let raw: TBTelemetryHandle
+    init(_ raw: TBTelemetryHandle) { self.raw = raw }
+}
+
 actor TelemetryService {
     static let shared = TelemetryService()
-    private var handle: TBTelemetryHandle?
+    private var handle: TelemetryHandleBox?
     private var lastSeq: UInt64 = 0
     private var isRunning = false
     private var startMonotonicNs: UInt64 = 0
@@ -79,7 +90,7 @@ actor TelemetryService {
 
         // Create + start on the telemetry queue, serialized with any wait/
         // stop from a previous session.
-        let startResult: Result<TBTelemetryHandle, TelemetryError> = await withCheckedContinuation { continuation in
+        let startResult: Result<TelemetryHandleBox, TelemetryError> = await withCheckedContinuation { continuation in
             queue.async {
                 guard let h = tb_telemetry_create() else {
                     continuation.resume(returning: .failure(.initialization("tb_telemetry_create returned null")))
@@ -87,7 +98,7 @@ actor TelemetryService {
                 }
                 let err = tb_telemetry_start(h, UInt32(max(intervalMilliseconds, 100)))
                 if err == TB_OK {
-                    continuation.resume(returning: .success(h))
+                    continuation.resume(returning: .success(TelemetryHandleBox(h)))
                 } else {
                     tb_telemetry_destroy(h)
                     continuation.resume(returning: .failure(.initialization("tb_telemetry_start failed: \(err)")))
@@ -96,8 +107,8 @@ actor TelemetryService {
         }
 
         switch startResult {
-        case .success(let h):
-            handle = h
+        case .success(let box):
+            handle = box
             core_util_reset()
         case .failure(let error):
             isRunning = false
@@ -125,7 +136,7 @@ actor TelemetryService {
     }
 
     private func readSampleOnce() async throws -> TelemetrySample {
-        guard let h = handle, isRunning else {
+        guard let box = handle, isRunning else {
             throw TelemetryError.notStarted
         }
 
@@ -133,6 +144,7 @@ actor TelemetryService {
 
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
+                let h = box.raw
                 var raw = TBTelemetrySample()
                 let err = tb_telemetry_wait_next(h, afterSeq, 5000, &raw)
                 // Resolve everything that needs the raw handle HERE, on the
@@ -263,7 +275,7 @@ actor TelemetryService {
     }
 
     func stopTelemetry() async {
-        guard isRunning, let h = handle else { return }
+        guard isRunning, let box = handle else { return }
         isRunning = false
         handle = nil
         // Queue stop + destroy behind any in-flight wait_next: the serial
@@ -271,6 +283,7 @@ actor TelemetryService {
         // handle is torn down — no concurrent alias, no use-after-free.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async {
+                let h = box.raw
                 tb_telemetry_stop(h)
                 tb_telemetry_destroy(h)
                 continuation.resume()

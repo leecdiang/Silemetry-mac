@@ -14,7 +14,8 @@ import Foundation
 
 var total = 0, passed = 0, failed = 0
 
-func test(_ name: String, _ body: () throws -> Void) {
+@MainActor
+func test(_ name: String, _ body: @MainActor () throws -> Void) {
     total += 1
     do {
         try body()
@@ -123,6 +124,7 @@ extension RunRecord {
 
 // MARK: - Test Suites
 
+@MainActor
 func runAllTests() -> (total: Int, passed: Int, failed: Int) {
     // @Model inits (RunRecord) fatal-error on macOS 14.x runtimes without an
     // active ModelContainer; newer runtimes tolerate detached models. Create
@@ -475,9 +477,7 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
             samples.append(s)
         }
         let cfg = TestConfiguration()
-        let run = MainActor.assumeIsolated { () -> RunRecord? in
-            TestCoordinator.cancelledRecord(samples: samples, config: cfg)
-        }
+        let run = TestCoordinator.cancelledRecord(samples: samples, config: cfg)
         try assertNotNil(run)
         try assertTrue(run!.wasInterrupted)
         try assertEqual(run!.phaseRaw, TestPhase.cancelled.rawValue)
@@ -488,9 +488,7 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
     }
 
     test("Cancel path: empty samples discard — nil record") {
-        let run = MainActor.assumeIsolated { () -> RunRecord? in
-            TestCoordinator.cancelledRecord(samples: [], config: TestConfiguration())
-        }
+        let run = TestCoordinator.cancelledRecord(samples: [], config: TestConfiguration())
         try assertNil(run)
     }
 
@@ -554,7 +552,7 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
 
     // ── TestCoordinator stop/discard finalization ───────────────────────
     test("stopAndSave finalizes via main task (cancelled record)") {
-        let coord = MainActor.assumeIsolated { () -> TestCoordinator in
+        let coord: TestCoordinator = { @MainActor () -> TestCoordinator in
             let c = TestCoordinator()
             var samples: [TelemetrySample] = []
             for i in 0..<10 {
@@ -568,12 +566,10 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
             c.samples = samples
             c.stopAndSave()
             return c
-        }
+        }()
         // stopAndSave only requests the stop; the final state is produced by
         // the (not running here) main task. Simulate its finalization path:
-        let run = MainActor.assumeIsolated { () -> RunRecord? in
-            TestCoordinator.cancelledRecord(samples: coord.samples, config: coord.testConfig)
-        }
+        let run = TestCoordinator.cancelledRecord(samples: coord.samples, config: coord.testConfig)
         try assertNotNil(run)
         try assertTrue(run!.wasInterrupted)
         try assertEqual(run!.phaseRaw, TestPhase.cancelled.rawValue)
@@ -582,7 +578,7 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
     }
 
     test("cancelAndDiscard produces no record") {
-        let coord = MainActor.assumeIsolated { () -> TestCoordinator in
+        let coord: TestCoordinator = { @MainActor () -> TestCoordinator in
             let c = TestCoordinator()
             var samples: [TelemetrySample] = []
             var s = TelemetrySample()
@@ -591,12 +587,10 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
             c.samples = samples
             c.cancelAndDiscard()
             return c
-        }
+        }()
         // Discard must never persist: the record builder returns nil for the
         // discarded path (coord samples are cleared by the main task).
-        let run = MainActor.assumeIsolated { () -> RunRecord? in
-            TestCoordinator.cancelledRecord(samples: [], config: coord.testConfig)
-        }
+        let run = TestCoordinator.cancelledRecord(samples: [], config: coord.testConfig)
         try assertNil(run)
     }
 
@@ -936,9 +930,7 @@ func runAllTests() -> (total: Int, passed: Int, failed: Int) {
             s.tempValid = true
             samples.append(s)
         }
-        let run = MainActor.assumeIsolated { () -> RunRecord? in
-            TestCoordinator.cancelledRecord(samples: samples, config: TestConfiguration())
-        }
+        let run = TestCoordinator.cancelledRecord(samples: samples, config: TestConfiguration())
         try assertNotNil(run)
         try assertEqual(run!.powerSourceAtStart, true)
         try assertEqual(run!.powerSourceAtEnd, false)

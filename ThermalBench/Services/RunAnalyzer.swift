@@ -108,7 +108,6 @@ enum RunAnalyzer {
         let overall = total > 0 ? Double(valid.count) / Double(total) : 0
 
         // Phase spans
-        let totalDuration = config.idleDuration + config.loadDuration + config.transitionDuration + config.cooldownDuration
         var offset: TimeInterval = 0
         let phases: [(TestPhase, TimeInterval)] = [
             (.baseline, config.idleDuration),
