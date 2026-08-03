@@ -155,7 +155,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <key>CFBundleName</key><string>Silemetry</string>
     <key>CFBundleIdentifier</key><string>com.leecdiang.Silemetry</string>
     <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleShortVersionString</key><string>0.2.0</string>
+    <key>CFBundleShortVersionString</key><string>0.2.1</string>
     <key>CFBundleExecutable</key><string>Silemetry</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

@@ -1,4 +1,4 @@
-# Silemetry [![Version](https://img.shields.io/badge/version-0.2.0-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![English](https://img.shields.io/badge/Language-English-4B5563?style=flat-square)](README_EN.md)
+# Silemetry [![Version](https://img.shields.io/badge/version-0.2.1-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![English](https://img.shields.io/badge/Language-English-4B5563?style=flat-square)](README_EN.md)
 
 Silemetry 是一款原生 macOS 性能遥测工具，专为观察 Apple Silicon 在持续负载下的真实表现而设计。
 
@@ -78,7 +78,7 @@ Silemetry 是一款原生 macOS 性能遥测工具，专为观察 Apple Silicon 
 
 #### 下载与安装
 
-前往 [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest) 下载 `Silemetry-v0.2.0-preview-arm64.dmg`。
+前往 [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest) 下载 `Silemetry-v0.2.1-arm64.dmg`。
 
 打开 DMG，将 Silemetry 拖入 Applications 即可。当前预览版使用 ad-hoc 签名，首次启动时需右键 → **打开** 确认，或前往 **系统设置 → 隐私与安全性** 手动放行。不要全局关闭 Gatekeeper。
 
@@ -98,9 +98,9 @@ Silemetry 会主动创建持续的 CPU 或 GPU 计算负载，机身升温属于
 
 ---
 
-#### v0.2.0-preview
+#### v0.2.1
 
-本次更新重点：Metal GPU 压力测试（Moderate / Maximum）、CPU Only / GPU Only / CPU+GPU 独立模式、P/E-Core QoS 调度倾向、完整 Custom Test 配置、动态设备识别、电池状态与 Low Power Mode 感知、自适应 Status Pill 组件、新 App 图标。
+本次更新重点：遥测句柄生命周期与并发安全修复、逐指标有效性掩码、Stop / Discard / 失败终结路径、JSONL 归档完整性校验与流式摘要、Compare 可比性与损坏数据检查、SwiftData 回滚与文件事务、动态设备/电源变化感知与真实 startedAt、70/70 测试通过（CI #15）。
 
 完整变更清单见 [Release](https://github.com/leecdiang/Silemetry-mac/releases/latest)。
 

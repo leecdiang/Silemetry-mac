@@ -34,7 +34,7 @@ cat > "$BUILD_DIR/TestInfo.plist" <<'PLIST'
     <key>CFBundleName</key><string>ThermalBenchTests</string>
     <key>CFBundleIdentifier</key><string>com.leecdiang.ThermalBenchTests</string>
     <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleShortVersionString</key><string>0.1</string>
+    <key>CFBundleShortVersionString</key><string>0.2.1</string>
 </dict>
 </plist>
 PLIST

@@ -1,4 +1,4 @@
-# Silemetry [![Version](https://img.shields.io/badge/version-0.2.0-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![简体中文](https://img.shields.io/badge/语言-简体中文-4B5563?style=flat-square)](README.md)
+# Silemetry [![Version](https://img.shields.io/badge/version-0.2.1-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![简体中文](https://img.shields.io/badge/语言-简体中文-4B5563?style=flat-square)](README.md)
 
 Silemetry is a native macOS telemetry tool for observing what an Apple Silicon Mac can sustain under continuous load.
 
@@ -78,7 +78,7 @@ Distinguishes between AC charging, battery discharge, Low Power Mode, and unavai
 
 #### Download & Install
 
-Download `Silemetry-v0.2.0-preview-arm64.dmg` from [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest).
+Download `Silemetry-v0.2.1-arm64.dmg` from [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest).
 
 Open the DMG and drag Silemetry into Applications. The current preview is ad-hoc signed—on first launch, Control-click → **Open**, or approve it in **System Settings → Privacy & Security**. Do not disable Gatekeeper globally.
 
@@ -98,9 +98,9 @@ Silemetry intentionally generates sustained CPU and GPU load. The enclosure beco
 
 ---
 
-#### v0.2.0 Preview
+#### v0.2.1
 
-Metal GPU stress testing (Moderate / Maximum), CPU Only / GPU Only / CPU+GPU independent modes, P/E-core QoS scheduling, full Custom Test configuration, dynamic device detection, battery and Low Power Mode awareness, adaptive Status Pill component, and a new application icon.
+Telemetry handle lifecycle and concurrency safety fixes, per-metric validity masks, Stop / Discard / failure finalization paths, JSONL archive integrity checks with streaming summaries, Compare comparability and corrupt-data checks, SwiftData rollback with file transactions, dynamic device and power-source change awareness with true startedAt, and 70/70 tests passing (CI #15).
 
 Full changelog: [Release](https://github.com/leecdiang/Silemetry-mac/releases/latest).
 

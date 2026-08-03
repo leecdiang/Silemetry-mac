@@ -65,7 +65,7 @@ final class CompareAnalyzerTests: XCTestCase {
         samples: Int = 300,
         coverage: Double = 0.95,
         interrupted: Bool = false,
-        appVersion: String = "0.2.0 (build 1)",
+        appVersion: String = "0.2.1 (build 1)",
         macOS: String = "macOS 26.5",
         cpuPeak: Double = 95.0,
         gpuPeak: Double = 75.0,
