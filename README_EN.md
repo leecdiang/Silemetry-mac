@@ -1,4 +1,4 @@
-# Silemetry [![Version](https://img.shields.io/badge/version-0.2.1-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![简体中文](https://img.shields.io/badge/语言-简体中文-4B5563?style=flat-square)](README.md)
+# Silemetry [![Version](https://img.shields.io/badge/version-0.2.2-2F81F7?labelColor=30363D&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases/latest) [![Downloads](https://img.shields.io/github/downloads/leecdiang/Silemetry-mac/total?label=downloads&labelColor=30363D&color=8B5CF6&style=flat-square)](https://github.com/leecdiang/Silemetry-mac/releases) [![简体中文](https://img.shields.io/badge/语言-简体中文-4B5563?style=flat-square)](README.md)
 
 Silemetry is a native macOS telemetry tool for observing what an Apple Silicon Mac can sustain under continuous load.
 
@@ -78,7 +78,7 @@ Distinguishes between AC charging, battery discharge, Low Power Mode, and unavai
 
 #### Download & Install
 
-Download `Silemetry-v0.2.1-arm64.dmg` from [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest).
+Download `Silemetry-v0.2.2-arm64.dmg` from [Releases](https://github.com/leecdiang/Silemetry-mac/releases/latest).
 
 Open the DMG and drag Silemetry into Applications. The current preview is ad-hoc signed—on first launch, Control-click → **Open**, or approve it in **System Settings → Privacy & Security**. Do not disable Gatekeeper globally.
 

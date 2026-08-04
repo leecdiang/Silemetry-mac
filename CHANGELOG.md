@@ -2,6 +2,15 @@
 
 All notable changes to Silemetry are documented here.
 
+## [0.2.2] - 2026-08-05
+
+### Fixed
+- Rust/Swift FFI soundness: remove aliasing `&mut` and a use-after-free window across the telemetry boundary (PR #2).
+- Memory leak: `IOReportCreateSamples` return value is now released (PR #4).
+
+### Packaging
+- DMG now ships with the drag-to-Applications shortcut (create-dmg `--app-drop-link`).
+
 ## [0.2.1] - 2026-08-03
 
 ### Fixed (stability & data integrity)
