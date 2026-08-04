@@ -167,6 +167,9 @@ static void read_power_ioreport(tb_power_freq_t *r) {
     } else {
         DBG("IOReport samples returned NULL");
     }
+    // A "Create" function returns a +1 reference, so the return value needs a release
+    // of its own. Guard against it aliasing the out-parameter we just released.
+    if (s3 && s3 != samples) CFRelease(s3);
     if (sub) CFRelease(sub);
     if (r2) CFRelease(r2);
     CFRelease(all);
