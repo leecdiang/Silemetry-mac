@@ -15,7 +15,11 @@ pub struct TelemetrySampler {
     running: Arc<AtomicBool>,
     stop_flag: Arc<AtomicBool>,
     last_error: Arc<Mutex<Option<String>>>,
-    thread: Option<thread::JoinHandle<()>>,
+    /// Behind a Mutex so every method can take `&self`. The C ABI hands out a raw
+    /// pointer that callers may use from several threads at once; if any entry point
+    /// needed `&mut self`, two concurrent calls would alias a mutable reference,
+    /// which is undefined behaviour even when the operations look harmless.
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl TelemetrySampler {
@@ -25,12 +29,16 @@ impl TelemetrySampler {
             running: Arc::new(AtomicBool::new(false)),
             stop_flag: Arc::new(AtomicBool::new(false)),
             last_error: Arc::new(Mutex::new(None)),
-            thread: None,
+            thread: Mutex::new(None),
         }
     }
 
-    pub fn start(&mut self, interval_ms: u32) -> Result<(), TBErrorCode> {
-        if self.running.load(Ordering::Acquire) {
+    pub fn start(&self, interval_ms: u32) -> Result<(), TBErrorCode> {
+        // Hold the thread slot for the whole call so two concurrent starts cannot
+        // both pass the `running` check and spawn a sampler each.
+        let mut slot = self.thread.lock().unwrap_or_else(|e| e.into_inner());
+
+        if self.running.load(Ordering::Acquire) || slot.is_some() {
             return Err(TBErrorCode::AlreadyStarted);
         }
 
@@ -40,7 +48,7 @@ impl TelemetrySampler {
         let last_error = Arc::clone(&self.last_error);
 
         stop_flag.store(false, Ordering::Release);
-        queue.lock().unwrap().clear();
+        queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
 
         let handle = thread::Builder::new()
             .name("ThermalBench-Telemetry".into())
@@ -49,7 +57,7 @@ impl TelemetrySampler {
                 let mut sampler = match Sampler::new() {
                     Ok(s) => s,
                     Err(e) => {
-                        *last_error.lock().unwrap() =
+                        *last_error.lock().unwrap_or_else(|e| e.into_inner()) =
                             Some(format!("Sampler::new: {:?}", e));
                         running.store(false, Ordering::Release);
                         return;
@@ -65,9 +73,12 @@ impl TelemetrySampler {
                 while !stop_flag.load(Ordering::Acquire) {
                     match sampler.get_metrics(interval_ms.max(100)) {
                         Ok(metrics) => {
-                            let now = SystemTime::now();
-                            let unix_ns =
-                                now.duration_since(UNIX_EPOCH).unwrap().as_nanos() as i64;
+                            // A clock set before 1970 would make this fail; report 0
+                            // rather than panicking inside the sampler thread.
+                            let unix_ns = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_nanos() as i64)
+                                .unwrap_or(0);
 
                             // Per-metric validity: only advertise channels that
                             // are actually present and sane this sample. Swift
@@ -132,14 +143,14 @@ impl TelemetrySampler {
 
                             seq += 1;
 
-                            let mut q = queue.lock().unwrap();
+                            let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
                             if q.len() >= QUEUE_CAPACITY {
                                 q.remove(0);
                             }
                             q.push(sample);
                         }
                         Err(e) => {
-                            *last_error.lock().unwrap() =
+                            *last_error.lock().unwrap_or_else(|e| e.into_inner()) =
                                 Some(format!("get_metrics: {:?}", e));
                             thread::sleep(Duration::from_millis(100));
                         }
@@ -151,11 +162,12 @@ impl TelemetrySampler {
 
         match handle {
             Ok(h) => {
-                self.thread = Some(h);
+                *slot = Some(h);
                 Ok(())
             }
             Err(e) => {
-                *self.last_error.lock().unwrap() = Some(format!("spawn: {}", e));
+                *self.last_error.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(format!("spawn: {}", e));
                 Err(TBErrorCode::Internal)
             }
         }
@@ -173,7 +185,7 @@ impl TelemetrySampler {
         let start = std::time::Instant::now();
         loop {
             {
-                let q = self.queue.lock().unwrap();
+                let q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(last) = q.last() {
                     if last.sequence_id > after_sequence_id {
                         return Ok(*last);
@@ -182,7 +194,7 @@ impl TelemetrySampler {
             }
 
             if !self.running.load(Ordering::Acquire) {
-                let q = self.queue.lock().unwrap();
+                let q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(last) = q.last() {
                     if last.sequence_id > after_sequence_id {
                         return Ok(*last);
@@ -220,17 +232,36 @@ impl TelemetrySampler {
     }
 
     pub fn last_error_string(&self) -> String {
-        self.last_error.lock().unwrap().clone().unwrap_or_default()
+        self.last_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default()
     }
 
-    pub fn stop(&mut self) -> Result<(), TBErrorCode> {
+    pub fn stop(&self) -> Result<(), TBErrorCode> {
         self.stop_flag.store(true, Ordering::Release);
-        if let Some(handle) = self.thread.take() {
+
+        // Take the handle out before joining so a second concurrent stop() sees None
+        // and returns immediately instead of trying to join the same thread twice.
+        let handle = self
+            .thread
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(handle) = handle {
             let _ = handle.join();
         }
+
         self.running.store(false, Ordering::Release);
-        self.queue.lock().unwrap().clear();
+        self.queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
         Ok(())
+    }
+}
+
+impl Default for TelemetrySampler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

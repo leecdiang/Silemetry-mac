@@ -25,7 +25,9 @@ pub extern "C" fn tb_telemetry_create() -> *mut TelemetrySampler {
 pub extern "C" fn tb_telemetry_start(handle: *mut TelemetrySampler, interval_ms: u32) -> TBErrorCode {
     safe_call(|| {
         if handle.is_null() { return TBErrorCode::InvalidArgument; }
-        let sampler = unsafe { &mut *handle };
+        // Shared reference: callers may hold this pointer on several threads, and
+        // `&mut` here would alias with any concurrent call on the same handle.
+        let sampler = unsafe { &*handle };
         match sampler.start(interval_ms) {
             Ok(()) => TBErrorCode::Ok,
             Err(e) => e,
@@ -45,7 +47,7 @@ pub extern "C" fn tb_telemetry_wait_next(
         if handle.is_null() || out_sample.is_null() {
             return TBErrorCode::InvalidArgument;
         }
-        let sampler = unsafe { &mut *handle };
+        let sampler = unsafe { &*handle };
         match sampler.wait_next(after_sequence_id, timeout_ms) {
             Ok(sample) => {
                 unsafe { *out_sample = sample; }
@@ -97,7 +99,7 @@ pub extern "C" fn tb_telemetry_last_error(
 pub extern "C" fn tb_telemetry_stop(handle: *mut TelemetrySampler) -> TBErrorCode {
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
         if handle.is_null() { return TBErrorCode::InvalidArgument; }
-        let sampler = unsafe { &mut *handle };
+        let sampler = unsafe { &*handle };
         match sampler.stop() {
             Ok(()) => TBErrorCode::Ok,
             Err(e) => e,
